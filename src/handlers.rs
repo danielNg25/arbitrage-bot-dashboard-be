@@ -105,17 +105,50 @@ pub async fn get_opportunity_details_handler(
 
     match crate::database::get_opportunity_details(&db, &opportunity_id).await {
         Ok(Some(details)) => {
-            info!("Successfully retrieved opportunity details for ID: {}", opportunity_id);
+            info!(
+                "Successfully retrieved opportunity details for ID: {}",
+                opportunity_id
+            );
             Ok(HttpResponse::Ok().json(details))
         }
         Ok(None) => {
             info!("Opportunity not found for ID: {}", opportunity_id);
-            Err(ApiError::NotFound(
-                "Opportunity not found".to_string(),
-            ))
+            Err(ApiError::NotFound("Opportunity not found".to_string()))
         }
         Err(e) => {
             error!("Database error while fetching opportunity details: {}", e);
+            Err(ApiError::DatabaseError(e.to_string()))
+        }
+    }
+}
+
+/// GET /opportunities/tx/{tx_hash} - Returns detailed opportunity information by transaction hash
+pub async fn get_opportunity_details_by_tx_handler(
+    path: web::Path<String>,
+    db: web::Data<Database>,
+) -> Result<HttpResponse, ApiError> {
+    let tx_hash = path.into_inner();
+    info!("Handling GET /opportunities/tx/{} request", tx_hash);
+
+    match crate::database::get_opportunity_details_by_tx_hash(&db, &tx_hash).await {
+        Ok(Some(details)) => {
+            info!(
+                "Successfully retrieved opportunity details for tx hash: {}",
+                tx_hash
+            );
+            Ok(HttpResponse::Ok().json(details))
+        }
+        Ok(None) => {
+            info!("Opportunity not found for tx hash: {}", tx_hash);
+            Err(ApiError::NotFound(
+                "Opportunity not found for the given transaction hash".to_string(),
+            ))
+        }
+        Err(e) => {
+            error!(
+                "Database error while fetching opportunity details by tx hash: {}",
+                e
+            );
             Err(ApiError::DatabaseError(e.to_string()))
         }
     }

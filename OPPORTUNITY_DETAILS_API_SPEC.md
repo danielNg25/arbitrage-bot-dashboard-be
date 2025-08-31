@@ -1,20 +1,35 @@
 # Opportunity Details API Specification
 
-## Endpoint: `GET /api/v1/opportunities/{id}`
+## Endpoints
 
-Returns comprehensive details for a specific opportunity, including the opportunity data, network information, and the complete trading path with tokens and pools.
+### `GET /api/v1/opportunities/{id}`
+
+Returns comprehensive details for a specific opportunity by MongoDB ObjectId, including the opportunity data, network information, and the complete trading path with tokens and pools.
+
+### `GET /api/v1/opportunities/tx/{tx_hash}`
+
+Returns comprehensive details for a specific opportunity by transaction hash (either source_tx or execute_tx), including the opportunity data, network information, and the complete trading path with tokens and pools.
 
 ### URL Parameters
+
+#### For `GET /api/v1/opportunities/{id}`
 
 | Parameter | Type     | Required | Description                         |
 | --------- | -------- | -------- | ----------------------------------- |
 | `id`      | `string` | Yes      | MongoDB ObjectId of the opportunity |
+
+#### For `GET /api/v1/opportunities/tx/{tx_hash}`
+
+| Parameter | Type     | Required | Description                                |
+| --------- | -------- | -------- | ------------------------------------------ |
+| `tx_hash` | `string` | Yes      | Transaction hash (source_tx or execute_tx) |
 
 ### Response Format
 
 ```json
 {
     "opportunity": {
+        "id": "507f1f77bcf86cd799439011",
         "network_id": 1,
         "status": "succeeded",
         "profit_usd": 25.5,
@@ -23,13 +38,33 @@ Returns comprehensive details for a specific opportunity, including the opportun
         "created_at": "2024-01-15T10:30:00Z",
         "source_tx": "0x1234...",
         "source_block_number": 12345678,
+        "source_log_index": 0,
+        "source_pool": "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc",
         "execute_block_number": 12345679,
+        "execute_tx": "0x5678...",
         "profit_token": "0x6B175474E89094C44Da98b954EedeAC495271d0F",
         "profit_token_name": "Dai Stablecoin",
         "profit_token_symbol": "DAI",
-        "profit_token_decimals": 18
+        "profit_token_decimals": 18,
+        "amount": "1000000000000000000",
+        "gas_token_amount": "50000000000000000",
+        "updated_at": "2024-01-15T10:35:00Z",
+        "estimate_profit": "1000000000000000000",
+        "estimate_profit_usd": 25.5,
+        "path": [
+            "0xA0b86a33E6441b8c4C8D7d3c2b8b7c1d5e2f3a4b",
+            "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc",
+            "0x6B175474E89094C44Da98b954EedeAC495271d0F"
+        ],
+        "received_at": "2024-01-15T10:29:00Z",
+        "send_at": "2024-01-15T10:30:00Z",
+        "simulation_time": 150,
+        "error": null,
+        "gas_amount": 21000,
+        "gas_price": 20000000000
     },
     "network": {
+        "id": "507f1f77bcf86cd799439012",
         "chain_id": 1,
         "name": "Ethereum Mainnet",
         "rpc": "https://eth-mainnet.alchemyapi.io/v2/your-api-key",
@@ -45,6 +80,7 @@ Returns comprehensive details for a specific opportunity, including the opportun
     },
     "path_tokens": [
         {
+            "id": "507f1f77bcf86cd799439013",
             "address": "0xA0b86a33E6441b8c4C8D7d3c2b8b7c1d5e2f3a4b",
             "name": "Wrapped Ether",
             "symbol": "WETH",
@@ -52,6 +88,7 @@ Returns comprehensive details for a specific opportunity, including the opportun
             "price": 2500.0
         },
         {
+            "id": "507f1f77bcf86cd799439014",
             "address": "0x6B175474E89094C44Da98b954EedeAC495271d0F",
             "name": "Dai Stablecoin",
             "symbol": "DAI",
@@ -61,6 +98,7 @@ Returns comprehensive details for a specific opportunity, including the opportun
     ],
     "path_pools": [
         {
+            "id": "507f1f77bcf86cd799439015",
             "address": "0xB4e16d0168e52d35CaCD2c6185b44281Ec28C9Dc",
             "pool_type": "UniswapV2",
             "tokens": [
@@ -85,11 +123,29 @@ Returns comprehensive details for a specific opportunity, including the opportun
 -   `created_at`: ISO 8601 timestamp when the opportunity was created
 -   `source_tx`: Transaction hash that discovered the opportunity
 -   `source_block_number`: Block number where the opportunity was discovered
+-   `source_log_index`: Log index in the source block
+-   `source_pool`: Address of the pool where the opportunity was discovered
 -   `execute_block_number`: Block number where the opportunity was executed
+-   `execute_tx`: Transaction hash of the execution
 -   `profit_token`: Address of the token received as profit
 -   `profit_token_name`: Human-readable name of the profit token
 -   `profit_token_symbol`: Symbol of the profit token
 -   `profit_token_decimals`: Decimal places for the profit token
+-   `amount`: Original amount in token's native units
+-   `gas_token_amount`: Gas amount in token's native units
+-   `updated_at`: ISO 8601 timestamp when the opportunity was last updated
+
+**Debug Information (from OpportunityDebug):**
+
+-   `estimate_profit`: Estimated profit before execution
+-   `estimate_profit_usd`: Estimated profit in USD before execution
+-   `path`: Trading path with tokens and pools (even indices are tokens, odd indices are pools)
+-   `received_at`: ISO 8601 timestamp when opportunity was received
+-   `send_at`: ISO 8601 timestamp when opportunity was sent
+-   `simulation_time`: Time taken for simulation in milliseconds
+-   `error`: Error message if execution failed
+-   `gas_amount`: Gas amount used
+-   `gas_price`: Gas price in wei
 
 #### `network` - Network Information
 
@@ -138,18 +194,30 @@ This represents the flow: Token → Pool → Token → Pool → Token, etc.
 
 ### Usage Examples
 
-#### Basic Request
+#### By Opportunity ID
 
 ```bash
 curl "http://localhost:8081/api/v1/opportunities/507f1f77bcf86cd799439011"
 ```
 
+#### By Transaction Hash
+
+```bash
+curl "http://localhost:8081/api/v1/opportunities/tx/0xd66919e024b35f0a4d5a7d91dd9a29044b1159369a60788260a7d512573c1f41"
+```
+
 #### Response with jq
 
 ```bash
+# By ID
 curl "http://localhost:8081/api/v1/opportunities/507f1f77bcf86cd799439011" | jq '.opportunity.status'
 curl "http://localhost:8081/api/v1/opportunities/507f1f77bcf86cd799439011" | jq '.network.name'
 curl "http://localhost:8081/api/v1/opportunities/507f1f77bcf86cd799439011" | jq '.path_tokens[0].symbol'
+
+# By Transaction Hash
+curl "http://localhost:8081/api/v1/opportunities/tx/0xd66919e024b35f0a4d5a7d91dd9a29044b1159369a60788260a7d512573c1f41" | jq '.opportunity.status'
+curl "http://localhost:8081/api/v1/opportunities/tx/0xd66919e024b35f0a4d5a7d91dd9a29044b1159369a60788260a7d512573c1f41" | jq '.network.name'
+curl "http://localhost:8081/api/v1/opportunities/tx/0xd66919e024b35f0a4d5a7d91dd9a29044b1159369a60788260a7d512573c1f41" | jq '.path_tokens[0].symbol'
 ```
 
 ### Error Responses
@@ -162,6 +230,14 @@ curl "http://localhost:8081/api/v1/opportunities/507f1f77bcf86cd799439011" | jq 
 }
 ```
 
+**For transaction hash endpoint:**
+
+```json
+{
+    "error": "Opportunity not found for the given transaction hash"
+}
+```
+
 #### 500 Internal Server Error
 
 ```json
@@ -170,9 +246,18 @@ curl "http://localhost:8081/api/v1/opportunities/507f1f77bcf86cd799439011" | jq 
 }
 ```
 
+**For transaction hash endpoint:**
+
+```json
+{
+    "error": "Failed to fetch opportunity details by tx hash"
+}
+```
+
 ### Notes
 
--   The endpoint performs multiple MongoDB queries to gather all related data
+-   Both endpoints perform multiple MongoDB queries to gather all related data
+-   The transaction hash endpoint searches both `source_tx` and `execute_tx` fields using MongoDB's `$or` operator
 -   If a token or pool in the path is not found in the database, basic information is returned with the address
 -   The profit token details are automatically populated if the token exists in the path
 -   All timestamps are returned in ISO 8601 format

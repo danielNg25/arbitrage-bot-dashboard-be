@@ -320,10 +320,46 @@ impl CountedTx {
 /// Opportunity Details Response - includes opportunity, network, tokens, and pools
 #[derive(Debug, Serialize)]
 pub struct OpportunityDetailsResponse {
-    pub opportunity: OpportunityResponse,
+    pub opportunity: OpportunityDetailsData,
     pub network: NetworkResponse,
     pub path_tokens: Vec<TokenResponse>,
     pub path_pools: Vec<PoolResponse>,
+}
+
+/// Opportunity Details Data - includes all fields from both Opportunity and OpportunityDebug
+#[derive(Debug, Serialize)]
+pub struct OpportunityDetailsData {
+    pub id: String, // MongoDB ObjectId as string
+    pub network_id: u64,
+    pub status: String,
+    pub profit_usd: Option<f64>,
+    pub profit_amount: Option<String>, // Profit amount in token's native units
+    pub gas_usd: Option<f64>,
+    pub created_at: String, // ISO 8601 formatted
+    pub source_tx: Option<String>,
+    pub source_block_number: Option<u64>,
+    pub source_log_index: Option<u64>,
+    pub source_pool: Option<String>,
+    pub execute_block_number: Option<u64>,
+    pub execute_tx: Option<String>,
+    pub profit_token: String,
+    pub profit_token_name: Option<String>,
+    pub profit_token_symbol: Option<String>,
+    pub profit_token_decimals: Option<u8>,
+    pub amount: Option<String>, // Original amount in token's native units
+    pub gas_token_amount: Option<String>, // Gas amount in token's native units
+    pub updated_at: String,     // ISO 8601 formatted
+
+    // Debug fields from OpportunityDebug
+    pub estimate_profit: Option<String>,
+    pub estimate_profit_usd: Option<f64>,
+    pub path: Option<Vec<String>>,
+    pub received_at: Option<String>, // ISO 8601 formatted
+    pub send_at: Option<String>,     // ISO 8601 formatted
+    pub simulation_time: Option<u64>,
+    pub error: Option<String>,
+    pub gas_amount: Option<u64>,
+    pub gas_price: Option<u64>,
 }
 
 /// Token Response for opportunity details
