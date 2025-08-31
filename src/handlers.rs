@@ -42,8 +42,8 @@ pub async fn get_opportunities_handler(
         query.max_profit_usd,
         query.min_gas_usd,
         query.max_gas_usd,
-        query.min_source_timestamp.clone(),
-        query.max_source_timestamp.clone(),
+        query.min_created_at.clone(),
+        query.max_created_at.clone(),
         query.page,
         query.limit,
     )

@@ -30,134 +30,7 @@ pub async fn init_database(db_config: &DatabaseConfig) -> DbResult<Database> {
 
     info!("Connected to MongoDB database: {}", db_config.database_name);
 
-    // Initialize collections with dummy data if they're empty
-    init_dummy_data(&db).await?;
-
     Ok(db)
-}
-
-async fn init_dummy_data(db: &Database) -> DbResult<()> {
-    let networks_collection: Collection<Network> = db.collection("networks");
-    let opportunities_collection: Collection<Opportunity> = db.collection("opportunities");
-
-    // Check if networks collection is empty
-    let network_count = networks_collection.count_documents(doc! {}, None).await?;
-
-    if network_count == 0 {
-        info!("Initializing dummy networks data...");
-
-        // Create dummy networks
-        let networks = vec![
-            Network::new(
-                1,
-                "Ethereum Mainnet".to_string(),
-                Some("https://eth-mainnet.alchemyapi.io/v2/your-api-key".to_string()),
-            ),
-            Network::new(
-                137,
-                "Polygon".to_string(),
-                Some("https://polygon-rpc.com".to_string()),
-            ),
-            Network::new(
-                56,
-                "Binance Smart Chain".to_string(),
-                Some("https://bsc-dataseed.binance.org".to_string()),
-            ),
-        ];
-
-        for mut network in networks {
-            // Add some dummy profit and gas data
-            network.total_profit_usd = rand::random::<f64>() * 10000.0;
-            network.total_gas_usd = rand::random::<f64>() * 1000.0;
-
-            // Add dummy metrics data
-            network.executed = Some(rand::random::<u64>() % 1000);
-            network.success = Some(rand::random::<u64>() % 800);
-            network.failed = Some(rand::random::<u64>() % 200);
-            network.last_proccesed_created_at =
-                Some(Utc::now().timestamp() as u64 - rand::random::<u64>() % 86400);
-
-            let result = networks_collection.insert_one(&network, None).await?;
-            if let Some(id) = result.inserted_id.as_object_id() {
-                info!("Created network: {} (ID: {})", network.name, id);
-            }
-        }
-    }
-
-    // Check if opportunities collection is empty
-    let opportunity_count = opportunities_collection
-        .count_documents(doc! {}, None)
-        .await?;
-
-    if opportunity_count == 0 {
-        info!("Initializing dummy opportunities data...");
-
-        // Create dummy opportunities
-        let mut opportunities = Vec::new();
-        let statuses = vec![
-            OpportunityStatus::Succeeded,
-            OpportunityStatus::PartiallySucceeded,
-            OpportunityStatus::Reverted,
-            OpportunityStatus::Error,
-            OpportunityStatus::Skipped,
-        ];
-
-        for i in 0..50 {
-            let network_id = match i % 3 {
-                0 => 1,   // Ethereum
-                1 => 137, // Polygon
-                _ => 56,  // BSC
-            };
-
-            let status = statuses[i % statuses.len()];
-            let profit_usd = if status == OpportunityStatus::Succeeded
-                || status == OpportunityStatus::PartiallySucceeded
-            {
-                Some(rand::random::<f64>() * 500.0)
-            } else {
-                None
-            };
-
-            let gas_usd = if status == OpportunityStatus::Succeeded
-                || status == OpportunityStatus::PartiallySucceeded
-            {
-                Some(rand::random::<f64>() * 50.0)
-            } else {
-                None
-            };
-
-            // Create dummy addresses and amounts
-            let dummy_address = Address::from_slice(&[i as u8; 20]);
-            let dummy_amount = U256::from(i as u64 + 1);
-
-            let opportunity = Opportunity::new(
-                network_id,
-                &dummy_address,
-                &dummy_amount,
-                status,
-                Some(rand::random::<u64>()),
-                Some(format!("0x{:064x}", rand::random::<u64>())),
-                Some(rand::random::<u64>()),
-                Some(format!("0x{:040x}", rand::random::<u64>())),
-                Some(rand::random::<u64>()),
-                Some(format!("0x{:064x}", rand::random::<u64>())),
-                Some(format!("{}", rand::random::<u64>())),
-                profit_usd,
-                Some(format!("{}", rand::random::<u64>())),
-                gas_usd,
-            );
-
-            opportunities.push(opportunity);
-        }
-
-        // Insert opportunities in batches
-        let result = opportunities_collection
-            .insert_many(opportunities, None)
-            .await?;
-        info!("Created {} dummy opportunities", result.inserted_ids.len());
-    }
-
-    Ok(())
 }
 
 pub async fn get_networks_with_stats(
@@ -214,8 +87,8 @@ pub async fn get_opportunities(
     max_profit_usd: Option<f64>,
     min_gas_usd: Option<f64>,
     max_gas_usd: Option<f64>,
-    min_source_timestamp: Option<String>,
-    max_source_timestamp: Option<String>,
+    min_created_at: Option<String>,
+    max_created_at: Option<String>,
     page: Option<u32>,
     limit: Option<u32>,
 ) -> DbResult<crate::models::PaginatedOpportunitiesResponse> {
@@ -268,65 +141,62 @@ pub async fn get_opportunities(
         filter.insert("gas_usd", gas_filter);
     }
 
-    // Handle source timestamp filtering
-    if min_source_timestamp.is_some() || max_source_timestamp.is_some() {
-        let mut source_timestamp_filter = doc! {};
+    // Handle created_at timestamp filtering
+    if min_created_at.is_some() || max_created_at.is_some() {
+        let mut created_at_filter = doc! {};
         let mut has_filter = false;
 
-        if let Some(min_ts) = &min_source_timestamp {
+        if let Some(min_ts) = &min_created_at {
             // Try to parse as Unix timestamp first, then as ISO 8601
             if let Ok(unix_ts) = min_ts.parse::<u64>() {
                 // Already a Unix timestamp
-                source_timestamp_filter.insert("$gte", unix_ts as i64);
+                created_at_filter.insert("$gte", unix_ts as i64);
                 has_filter = true;
                 info!(
-                    "Applied min_source_timestamp (Unix): {} -> filter: $gte: {}",
+                    "Applied min_created_at (Unix): {} -> filter: $gte: {}",
                     min_ts, unix_ts
                 );
             } else if let Ok(dt) = DateTime::parse_from_rfc3339(min_ts) {
                 // Parse ISO 8601 timestamp and convert to Unix timestamp
                 let unix_ts = dt.timestamp() as u64;
-                source_timestamp_filter.insert("$gte", unix_ts as i64);
+                created_at_filter.insert("$gte", unix_ts as i64);
                 has_filter = true;
                 info!(
-                    "Applied min_source_timestamp (ISO): {} -> filter: $gte: {}",
+                    "Applied min_created_at (ISO): {} -> filter: $gte: {}",
                     min_ts, unix_ts
                 );
             } else {
-                info!("Invalid min_source_timestamp format: {}", min_ts);
+                info!("Invalid min_created_at format: {}", min_ts);
             }
         }
 
-        if let Some(max_ts) = &max_source_timestamp {
+        if let Some(max_ts) = &max_created_at {
             // Try to parse as Unix timestamp first, then as ISO 8601
             if let Ok(unix_ts) = max_ts.parse::<u64>() {
                 // Already a Unix timestamp
-                source_timestamp_filter.insert("$lte", unix_ts as i64);
+                created_at_filter.insert("$lte", unix_ts as i64);
                 has_filter = true;
                 info!(
-                    "Applied max_source_timestamp (Unix): {} -> filter: $lte: {}",
+                    "Applied max_created_at (Unix): {} -> filter: $lte: {}",
                     max_ts, unix_ts
                 );
             } else if let Ok(dt) = DateTime::parse_from_rfc3339(max_ts) {
                 // Parse ISO 8601 timestamp and convert to Unix timestamp
                 let unix_ts = dt.timestamp() as u64;
-                source_timestamp_filter.insert("$lte", unix_ts as i64);
+                created_at_filter.insert("$lte", unix_ts as i64);
                 has_filter = true;
                 info!(
-                    "Applied max_source_timestamp (ISO): {} -> filter: $lte: {}",
+                    "Applied max_created_at (ISO): {} -> filter: $lte: {}",
                     max_ts, unix_ts
                 );
             } else {
-                info!("Invalid max_source_timestamp format: {}", max_ts);
+                info!("Invalid max_created_at format: {}", max_ts);
             }
         }
 
         if has_filter {
-            info!(
-                "Final source timestamp filter: {:?}",
-                source_timestamp_filter
-            );
-            filter.insert("source_block_timestamp", source_timestamp_filter);
+            info!("Final created_at filter: {:?}", created_at_filter);
+            filter.insert("created_at", created_at_filter);
             info!("Final complete filter: {:?}", filter);
         }
     }
@@ -431,20 +301,7 @@ pub async fn get_opportunities(
             created_at: created_at_str,
             source_tx,
             source_block_number,
-            source_block_timestamp: doc.get_i64("source_block_timestamp").ok().and_then(|ts| {
-                DateTime::from_timestamp(ts, 0)
-                    .map(|dt| dt.format("%Y-%m-%dT%H:%M:%SZ").to_string())
-            }),
             execute_block_number: doc.get_i64("execute_block_number").ok().map(|n| n as u64),
-            execute_block_timestamp: doc.get_i64("execute_block_timestamp").ok().and_then(
-                |block_num| {
-                    // Convert block number to approximate timestamp (assuming 12 second block time)
-                    // This is a rough approximation - in production you might want to use a block timestamp service
-                    let block_time = block_num * 12; // 12 seconds per block
-                    DateTime::from_timestamp(block_time, 0)
-                        .map(|dt| dt.format("%Y-%m-%dT%H:%M:%SZ").to_string())
-                },
-            ),
             profit_token,
             profit_token_name,
             profit_token_symbol,
