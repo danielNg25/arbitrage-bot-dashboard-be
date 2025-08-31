@@ -70,6 +70,13 @@ async fn init_dummy_data(db: &Database) -> DbResult<()> {
             network.total_profit_usd = rand::random::<f64>() * 10000.0;
             network.total_gas_usd = rand::random::<f64>() * 1000.0;
 
+            // Add dummy metrics data
+            network.executed = Some(rand::random::<u64>() % 1000);
+            network.success = Some(rand::random::<u64>() % 800);
+            network.failed = Some(rand::random::<u64>() % 200);
+            network.last_proccesed_created_at =
+                Some(Utc::now().timestamp() as u64 - rand::random::<u64>() % 86400);
+
             let result = networks_collection.insert_one(&network, None).await?;
             if let Some(id) = result.inserted_id.as_object_id() {
                 info!("Created network: {} (ID: {})", network.name, id);
@@ -157,7 +164,6 @@ pub async fn get_networks_with_stats(
     db: &Database,
 ) -> DbResult<Vec<crate::models::NetworkResponse>> {
     let networks_collection: Collection<Network> = db.collection("networks");
-    let opportunities_collection: Collection<Opportunity> = db.collection("opportunities");
 
     let mut networks = Vec::new();
     let mut cursor = networks_collection.find(doc! {}, None).await?;
@@ -166,22 +172,32 @@ pub async fn get_networks_with_stats(
         let network = network?;
 
         // Count executed opportunities for this network
-        let executed_count = opportunities_collection
-            .count_documents(
-                doc! {
-                    "network_id": network.chain_id as i64,
-                    "status": "succeeded"
-                },
-                None,
-            )
-            .await?;
+
+        // Calculate success rate
+        let success_rate =
+            if let (Some(executed), Some(success)) = (network.executed, network.success) {
+                if executed > 0 {
+                    Some(success as f64 / executed as f64)
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
 
         let response = crate::models::NetworkResponse {
             chain_id: network.chain_id,
             name: network.name,
+            rpc: network.rpc,
+            block_explorer: network.block_explorer,
+            executed: network.executed,
+            success: network.success,
+            failed: network.failed,
             total_profit_usd: network.total_profit_usd,
             total_gas_usd: network.total_gas_usd,
-            executed_opportunities: executed_count,
+            last_proccesed_created_at: network.last_proccesed_created_at,
+            created_at: network.created_at,
+            success_rate,
         };
 
         networks.push(response);
@@ -194,43 +210,252 @@ pub async fn get_opportunities(
     db: &Database,
     network_id: Option<u64>,
     status: Option<String>,
-) -> DbResult<Vec<crate::models::OpportunityResponse>> {
+    statuses: Option<Vec<String>>,
+    min_profit_usd: Option<f64>,
+    max_profit_usd: Option<f64>,
+    min_gas_usd: Option<f64>,
+    max_gas_usd: Option<f64>,
+    page: Option<u32>,
+    limit: Option<u32>,
+) -> DbResult<crate::models::PaginatedOpportunitiesResponse> {
+    // Prepare statuses for post-filtering
+    let mut post_filter_statuses: Option<Vec<String>> = None;
     let opportunities_collection: Collection<Opportunity> = db.collection("opportunities");
+    let _tokens_collection: Collection<crate::models::Token> = db.collection("tokens");
 
     let mut filter = doc! {};
 
+    // Apply filters
     if let Some(nid) = network_id {
         filter.insert("network_id", nid as i64);
     }
 
-    if let Some(s) = status {
-        filter.insert("status", s);
+    // Handle status filtering - support both single status and multiple statuses with case-insensitive matching
+    if let Some(statuses) = &statuses {
+        // Multiple statuses - use exact matching for reliability
+        // Convert all statuses to the exact case they appear in the database
+        let exact_statuses: Vec<String> = statuses
+            .iter()
+            .map(|s| {
+                // Map common variations to exact database values
+                match s.to_lowercase().as_str() {
+                    "succeeded" => "PartiallySucceeded".to_string(), // Map succeeded to PartiallySucceeded since Succeeded doesn't exist
+                    "partiallysucceeded" => "PartiallySucceeded".to_string(),
+                    "reverted" => "Reverted".to_string(),
+                    "error" => "Error".to_string(),
+                    "skipped" => "Skipped".to_string(),
+                    _ => s.clone(), // Keep original if no mapping found
+                }
+            })
+            .collect();
+
+        // Remove duplicates and filter out empty statuses
+        let mut unique_statuses: Vec<String> = exact_statuses
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect();
+        unique_statuses.sort();
+        unique_statuses.dedup();
+
+        if !unique_statuses.is_empty() {
+            // Store the statuses for post-filtering since MongoDB $in is not working correctly
+            post_filter_statuses = Some(unique_statuses.clone());
+            info!(
+                "Will apply post-filtering for statuses: {:?} -> {:?}",
+                statuses, unique_statuses
+            );
+        } else {
+            info!("No valid statuses found in filter: {:?}", statuses);
+        }
+    } else if let Some(s) = &status {
+        // Single status - use case-insensitive regex matching
+        let status_regex = format!("^{}$", regex::escape(s));
+        filter.insert(
+            "status",
+            doc! {
+                "$regex": status_regex,
+                "$options": "i"
+            },
+        );
+        info!("Applied single status filter (case-insensitive): {}", s);
     }
 
-    let mut opportunities = Vec::new();
-    let mut cursor = opportunities_collection.find(filter, None).await?;
+    info!("Final filter: {:?}", filter);
 
-    while let Some(opportunity) = cursor.next().await {
-        let opportunity = opportunity?;
+    // Profit USD range filter
+    if min_profit_usd.is_some() || max_profit_usd.is_some() {
+        let mut profit_filter = doc! {};
+        if let Some(min) = min_profit_usd {
+            profit_filter.insert("$gte", min);
+        }
+        if let Some(max) = max_profit_usd {
+            profit_filter.insert("$lte", max);
+        }
+        filter.insert("profit_usd", profit_filter);
+    }
+
+    // Gas USD range filter
+    if min_gas_usd.is_some() || max_gas_usd.is_some() {
+        let mut gas_filter = doc! {};
+        if let Some(min) = min_gas_usd {
+            gas_filter.insert("$gte", min);
+        }
+        if let Some(max) = max_gas_usd {
+            gas_filter.insert("$lte", max);
+        }
+        filter.insert("gas_usd", gas_filter);
+    }
+
+    // Pagination parameters
+    let page = page.unwrap_or(1);
+    let limit = limit.unwrap_or(100).min(1000); // Cap at 1000
+    let skip = (page - 1) * limit;
+
+    // Get total count for pagination
+    let total = opportunities_collection
+        .count_documents(filter.clone(), None)
+        .await?;
+    let total_pages = ((total as f64) / (limit as f64)).ceil() as u32;
+
+    // Build aggregation pipeline for joining opportunities with tokens
+    let pipeline = vec![
+        doc! { "$match": filter },
+        doc! {
+            "$lookup": {
+                "from": "tokens",
+                "let": {
+                    "opp_network_id": "$network_id",
+                    "opp_profit_token": "$profit_token"
+                },
+                "pipeline": [
+                    doc! {
+                        "$match": {
+                            "$expr": {
+                                "$and": [
+                                    { "$eq": ["$network_id", "$$opp_network_id"] },
+                                    { "$eq": ["$address", "$$opp_profit_token"] }
+                                ]
+                            }
+                        }
+                    }
+                ],
+                "as": "token_info"
+            }
+        },
+        doc! {
+            "$addFields": {
+                "token_data": {
+                    "$ifNull": [
+                        { "$arrayElemAt": ["$token_info", 0] },
+                        {}
+                    ]
+                }
+            }
+        },
+        doc! {
+            "$sort": { "created_at": -1 }
+        },
+        doc! {
+            "$skip": skip as i64
+        },
+        doc! {
+            "$limit": limit as i64
+        },
+    ];
+
+    // Execute aggregation pipeline
+    let mut opportunities = Vec::new();
+    let mut cursor = opportunities_collection.aggregate(pipeline, None).await?;
+
+    while let Some(doc) = cursor.next().await {
+        let doc = doc?;
+
+        // Extract opportunity data
+        let network_id = doc.get_i64("network_id")? as u64;
+        let status = doc.get_str("status")?.to_string();
+        let profit_usd = doc.get_f64("profit_usd").ok();
+        let gas_usd = doc.get_f64("gas_usd").ok();
+        let created_at = doc.get_i64("created_at")? as u64;
+        let source_tx = doc.get_str("source_tx").ok().map(|s| s.to_string());
+        let source_block_number = doc.get_i64("source_block_number").ok().map(|n| n as u64);
+        let profit_token = doc.get_str("profit_token")?.to_string();
+
+        // Extract token data from joined result
+        let empty_doc = doc! {};
+        let token_data = doc.get_document("token_data").unwrap_or(&empty_doc);
+        let profit_token_name = token_data.get_str("name").ok().map(|s| s.to_string());
+        let profit_token_symbol = token_data.get_str("symbol").ok().map(|s| s.to_string());
+        let profit_token_decimals = if let Some(bson::Bson::Int32(n)) = token_data.get("decimals") {
+            Some(*n as u8)
+        } else {
+            None
+        };
 
         // Convert timestamp to ISO 8601 string
-        let created_at = DateTime::from_timestamp(opportunity.created_at as i64, 0)
+        let created_at_str = DateTime::from_timestamp(created_at as i64, 0)
             .unwrap_or_else(|| Utc::now())
             .format("%Y-%m-%dT%H:%M:%SZ")
             .to_string();
 
         let response = crate::models::OpportunityResponse {
-            network_id: opportunity.network_id,
-            status: opportunity.status,
-            profit_usd: opportunity.profit_usd,
-            gas_usd: opportunity.gas_usd,
-            created_at,
+            network_id,
+            status,
+            profit_usd,
+            gas_usd,
+            created_at: created_at_str,
+            source_tx,
+            source_block_number,
+            profit_token,
+            profit_token_name,
+            profit_token_symbol,
+            profit_token_decimals,
         };
 
         opportunities.push(response);
     }
 
-    Ok(opportunities)
+    // Apply post-filtering for statuses if needed
+    if let Some(ref filter_statuses) = post_filter_statuses {
+        let original_count = opportunities.len();
+        opportunities.retain(|opp| filter_statuses.contains(&opp.status));
+        let filtered_count = opportunities.len();
+        info!(
+            "Post-filtered opportunities: {} -> {} (filter: {:?})",
+            original_count, filtered_count, filter_statuses
+        );
+
+        // Recalculate pagination for filtered results
+        let total = opportunities.len() as u64;
+        let total_pages = ((total as f64) / (limit as f64)).ceil() as u32;
+
+        let pagination = crate::models::PaginationInfo {
+            page,
+            limit,
+            total,
+            total_pages,
+            has_next: page < total_pages,
+            has_prev: page > 1,
+        };
+
+        return Ok(crate::models::PaginatedOpportunitiesResponse {
+            opportunities,
+            pagination,
+        });
+    }
+
+    let pagination = crate::models::PaginationInfo {
+        page,
+        limit,
+        total,
+        total_pages,
+        has_next: page < total_pages,
+        has_prev: page > 1,
+    };
+
+    Ok(crate::models::PaginatedOpportunitiesResponse {
+        opportunities,
+        pagination,
+    })
 }
 
 pub async fn get_profit_over_time(

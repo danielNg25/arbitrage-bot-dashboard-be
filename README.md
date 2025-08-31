@@ -16,7 +16,7 @@ A high-performance Rust backend API built with Actix Web framework for serving d
 
 ### 1. GET /api/v1/networks
 
-Returns all networks with statistics including executed opportunities count.
+Returns all networks with comprehensive metrics and statistics data.
 
 **Response:**
 
@@ -25,34 +25,58 @@ Returns all networks with statistics including executed opportunities count.
     {
         "chain_id": 1,
         "name": "Ethereum Mainnet",
+        "rpc": "https://eth-mainnet.alchemyapi.io/v2/your-api-key",
+        "block_explorer": "https://etherscan.io",
+        "executed": 150,
+        "success": 120,
+        "failed": 30,
         "total_profit_usd": 1250.5,
         "total_gas_usd": 45.2,
-        "executed_opportunities": 15
+        "last_proccesed_created_at": 1704067200,
+        "created_at": 1704067200,
+        "executed_opportunities": 150,
+        "success_rate": 80.0
     }
 ]
 ```
 
 ### 2. GET /api/v1/opportunities
 
-Returns opportunities with optional filtering by network_id and status.
+Returns opportunities with optional filtering and pagination. Maximum 1000 opportunities per request.
 
 **Query Parameters:**
 
 -   `network_id` (optional): Filter by specific network chain ID
 -   `status` (optional): Filter by opportunity status
+-   `min_profit_usd` (optional): Minimum profit in USD
+-   `max_profit_usd` (optional): Maximum profit in USD
+-   `min_gas_usd` (optional): Minimum gas cost in USD
+-   `max_gas_usd` (optional): Maximum gas cost in USD
+-   `page` (optional): Page number (default: 1)
+-   `limit` (optional): Items per page (default: 100, max: 1000)
 
 **Response:**
 
 ```json
-[
-    {
-        "network_id": 1,
-        "status": "succeeded",
-        "profit_usd": 25.5,
-        "gas_usd": 3.2,
-        "created_at": "2024-01-15T10:30:00Z"
+{
+    "opportunities": [
+        {
+            "network_id": 1,
+            "status": "succeeded",
+            "profit_usd": 25.5,
+            "gas_usd": 3.2,
+            "created_at": "2024-01-15T10:30:00Z"
+        }
+    ],
+    "pagination": {
+        "page": 1,
+        "limit": 100,
+        "total": 1250,
+        "total_pages": 13,
+        "has_next": true,
+        "has_prev": false
     }
-]
+}
 ```
 
 ### 3. GET /api/v1/opportunities/profit-over-time
@@ -274,8 +298,23 @@ Test the API endpoints using curl:
 # Get networks
 curl http://localhost:8081/api/v1/networks
 
-# Get opportunities
+# Get opportunities with basic filtering
 curl "http://localhost:8081/api/v1/opportunities?network_id=1&status=succeeded"
+
+# Get opportunities with multiple statuses
+curl "http://localhost:8081/api/v1/opportunities?statuses=succeeded&statuses=partially_succeeded"
+
+# Get opportunities with profit range filtering
+curl "http://localhost:8081/api/v1/opportunities?min_profit_usd=10.0&max_profit_usd=100.0"
+
+# Get opportunities with gas cost filtering
+curl "http://localhost:8081/api/v1/opportunities?min_gas_usd=1.0&max_gas_usd=10.0"
+
+# Get opportunities with pagination
+curl "http://localhost:8081/api/v1/opportunities?page=2&limit=50"
+
+# Get opportunities with combined filters and pagination
+curl "http://localhost:8081/api/v1/opportunities?network_id=1&min_profit_usd=50.0&page=1&limit=200"
 
 # Get profit over time
 curl http://localhost:8081/api/v1/opportunities/profit-over-time

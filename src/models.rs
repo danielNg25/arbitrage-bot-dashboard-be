@@ -237,9 +237,16 @@ pub enum PoolType {
 pub struct NetworkResponse {
     pub chain_id: u64,
     pub name: String,
+    pub rpc: Option<String>,
+    pub block_explorer: Option<String>,
+    pub executed: Option<u64>,
+    pub success: Option<u64>,
+    pub failed: Option<u64>,
     pub total_profit_usd: f64,
     pub total_gas_usd: f64,
-    pub executed_opportunities: u64,
+    pub last_proccesed_created_at: Option<u64>,
+    pub created_at: u64,
+    pub success_rate: Option<f64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -249,6 +256,28 @@ pub struct OpportunityResponse {
     pub profit_usd: Option<f64>,
     pub gas_usd: Option<f64>,
     pub created_at: String, // ISO 8601 formatted
+    pub source_tx: Option<String>,
+    pub source_block_number: Option<u64>,
+    pub profit_token: String,
+    pub profit_token_name: Option<String>,
+    pub profit_token_symbol: Option<String>,
+    pub profit_token_decimals: Option<u8>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PaginatedOpportunitiesResponse {
+    pub opportunities: Vec<OpportunityResponse>,
+    pub pagination: PaginationInfo,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PaginationInfo {
+    pub page: u32,
+    pub limit: u32,
+    pub total: u64,
+    pub total_pages: u32,
+    pub has_next: bool,
+    pub has_prev: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -261,7 +290,15 @@ pub struct ProfitOverTimeResponse {
 #[derive(Debug, Deserialize)]
 pub struct OpportunityQuery {
     pub network_id: Option<u64>,
-    pub status: Option<String>,
+    pub status: Option<String>, // Single status (backward compatibility)
+    #[serde(rename = "statuses[]")]
+    pub statuses: Option<Vec<String>>, // Multiple statuses (new feature)
+    pub min_profit_usd: Option<f64>,
+    pub max_profit_usd: Option<f64>,
+    pub min_gas_usd: Option<f64>,
+    pub max_gas_usd: Option<f64>,
+    pub page: Option<u32>,
+    pub limit: Option<u32>,
 }
 
 /// Opportunity Debug model for MongoDB (debug data)
