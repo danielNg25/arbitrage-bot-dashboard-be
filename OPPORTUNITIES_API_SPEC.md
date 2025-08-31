@@ -35,16 +35,43 @@ The `/api/v1/opportunities` endpoint provides comprehensive access to arbitrage 
 
 ### Gas Cost Filtering
 
-| Parameter     | Type  | Required | Default | Description                       |
-| ------------- | ----- | -------- | ------- | --------------------------------- |
-| `min_gas_usd` | `f64` | No       | -       | Minimum gas cost threshold in USD |
-| `max_gas_usd` | `f64` | No       | -       | Maximum gas cost threshold in USD |
+| Parameter              | Type     | Required | Default | Description                                           |
+| ---------------------- | -------- | -------- | ------- | ----------------------------------------------------- |
+| `min_gas_usd`          | `f64`    | No       | -       | Minimum gas cost threshold in USD                     |
+| `max_gas_usd`          | `f64`    | No       | -       | Maximum gas cost threshold in USD                     |
+| `min_source_timestamp` | `string` | No       | -       | Minimum source timestamp (ISO 8601 or Unix timestamp) |
+| `max_source_timestamp` | `string` | No       | -       | Maximum source timestamp (ISO 8601 or Unix timestamp) |
 
 **Usage Examples:**
 
 -   `min_gas_usd=0.001` - Only opportunities with gas cost ≥ $0.001
 -   `max_gas_usd=5.0` - Only opportunities with gas cost ≤ $5.00
 -   `min_gas_usd=0.1&max_gas_usd=2.0` - Gas cost range $0.10 - $2.00
+
+### Source Timestamp Filtering
+
+| Parameter              | Type     | Required | Default | Description                                           |
+| ---------------------- | -------- | -------- | ------- | ----------------------------------------------------- |
+| `min_source_timestamp` | `string` | No       | -       | Minimum source timestamp (ISO 8601 or Unix timestamp) |
+| `max_source_timestamp` | `string` | No       | -       | Maximum source timestamp (ISO 8601 or Unix timestamp) |
+
+**Usage Examples:**
+
+**ISO 8601 Format:**
+
+-   `min_source_timestamp=2024-01-01T00:00:00Z` - Only opportunities discovered after January 1, 2024
+-   `max_source_timestamp=2024-01-31T23:59:59Z` - Only opportunities discovered before January 31, 2024
+-   `min_source_timestamp=2024-01-01T00:00:00Z&max_source_timestamp=2024-01-31T23:59:59Z` - Source time range January 1-31, 2024
+
+**Unix Timestamp Format:**
+
+-   `min_source_timestamp=1704067200` - Only opportunities discovered after January 1, 2024 (Unix: 1704067200)
+-   `max_source_timestamp=1706745599` - Only opportunities discovered before January 31, 2024 (Unix: 1706745599)
+-   `min_source_timestamp=1704067200&max_source_timestamp=1706745599` - Source time range January 1-31, 2024
+
+**Mixed Format (also supported):**
+
+-   `min_source_timestamp=1704067200&max_source_timestamp=2024-01-31T23:59:59Z` - Mix of Unix and ISO formats
 
 ### Pagination Parameters
 
@@ -78,10 +105,14 @@ interface OpportunityResponse {
     network_id: number; // Blockchain network chain ID
     status: string; // Execution status (e.g., "succeeded", "reverted")
     profit_usd: number | null; // Profit amount in USD (null if not available)
+    profit_amount: string | null; // Profit amount in token's native units (null if not available)
     gas_usd: number | null; // Gas cost in USD (null if not available)
     created_at: string; // ISO 8601 timestamp (YYYY-MM-DDTHH:MM:SSZ)
     source_tx: string | null; // Source transaction hash (null if not available)
     source_block_number: number | null; // Source block number (null if not available)
+    source_block_timestamp: string | null; // ISO 8601 timestamp when opportunity was discovered (null if not available)
+    execute_block_number: number | null; // Block number when opportunity was executed (null if not available)
+    execute_block_timestamp: string | null; // ISO 8601 timestamp when executed (null if not available)
     profit_token: string; // Profit token contract address
     profit_token_name: string | null; // Profit token name (null if not available)
     profit_token_symbol: string | null; // Profit token symbol (null if not available)
@@ -222,9 +253,17 @@ curl "http://localhost:8081/api/v1/opportunities?status=partiallysucceeded&min_p
 curl "http://localhost:8081/api/v1/opportunities?status=Error&min_gas_usd=0.001&max_gas_usd=0.01&network_id=252&limit=100"
 curl "http://localhost:8081/api/v1/opportunities?status=error&min_gas_usd=0.001&max_gas_usd=0.01&network_id=252&limit=100"
 
+# Single status + source timestamp range (ISO format) - Case-insensitive
+curl "http://localhost:8081/api/v1/opportunities?status=PartiallySucceeded&min_source_timestamp=2024-01-01T00:00:00Z&max_source_timestamp=2024-01-31T23:59:59Z&limit=100"
+curl "http://localhost:8081/api/v1/opportunities?status=partiallysucceeded&min_source_timestamp=2024-01-01T00:00:00Z&max_source_timestamp=2024-01-31T23:59:59Z&limit=100"
+
+# Single status + source timestamp range (Unix format) - Case-insensitive
+curl "http://localhost:8081/api/v1/opportunities?status=PartiallySucceeded&min_source_timestamp=1704067200&max_source_timestamp=1706745599&limit=100"
+curl "http://localhost:8081/api/v1/opportunities?status=partiallysucceeded&min_source_timestamp=1704067200&max_source_timestamp=1706745599&limit=100"
+
 # Complex combination - Case-insensitive
-curl "http://localhost:8081/api/v1/opportunities?status=PartiallySucceeded&min_profit_usd=0.01&max_profit_usd=1.0&min_gas_usd=0.001&network_id=252&page=1&limit=200"
-curl "http://localhost:8081/api/v1/opportunities?status=partiallysucceeded&min_profit_usd=0.01&max_profit_usd=1.0&min_gas_usd=0.001&network_id=252&page=1&limit=200"
+curl "http://localhost:8081/api/v1/opportunities?status=PartiallySucceeded&min_profit_usd=0.01&max_profit_usd=1.0&min_gas_usd=0.001&min_source_timestamp=2024-01-01T00:00:00Z&network_id=252&page=1&limit=200"
+curl "http://localhost:8081/api/v1/opportunities?status=partiallysucceeded&min_profit_usd=0.01&max_profit_usd=1.0&min_gas_usd=0.001&min_source_timestamp=2024-01-01T00:00:00Z&network_id=252&page=1&limit=200"
 ```
 
 ## Response Examples

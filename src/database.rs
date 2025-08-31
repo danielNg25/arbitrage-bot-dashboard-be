@@ -214,6 +214,8 @@ pub async fn get_opportunities(
     max_profit_usd: Option<f64>,
     min_gas_usd: Option<f64>,
     max_gas_usd: Option<f64>,
+    min_source_timestamp: Option<String>,
+    max_source_timestamp: Option<String>,
     page: Option<u32>,
     limit: Option<u32>,
 ) -> DbResult<crate::models::PaginatedOpportunitiesResponse> {
@@ -264,6 +266,69 @@ pub async fn get_opportunities(
             gas_filter.insert("$lte", max);
         }
         filter.insert("gas_usd", gas_filter);
+    }
+
+    // Handle source timestamp filtering
+    if min_source_timestamp.is_some() || max_source_timestamp.is_some() {
+        let mut source_timestamp_filter = doc! {};
+        let mut has_filter = false;
+
+        if let Some(min_ts) = &min_source_timestamp {
+            // Try to parse as Unix timestamp first, then as ISO 8601
+            if let Ok(unix_ts) = min_ts.parse::<u64>() {
+                // Already a Unix timestamp
+                source_timestamp_filter.insert("$gte", unix_ts as i64);
+                has_filter = true;
+                info!(
+                    "Applied min_source_timestamp (Unix): {} -> filter: $gte: {}",
+                    min_ts, unix_ts
+                );
+            } else if let Ok(dt) = DateTime::parse_from_rfc3339(min_ts) {
+                // Parse ISO 8601 timestamp and convert to Unix timestamp
+                let unix_ts = dt.timestamp() as u64;
+                source_timestamp_filter.insert("$gte", unix_ts as i64);
+                has_filter = true;
+                info!(
+                    "Applied min_source_timestamp (ISO): {} -> filter: $gte: {}",
+                    min_ts, unix_ts
+                );
+            } else {
+                info!("Invalid min_source_timestamp format: {}", min_ts);
+            }
+        }
+
+        if let Some(max_ts) = &max_source_timestamp {
+            // Try to parse as Unix timestamp first, then as ISO 8601
+            if let Ok(unix_ts) = max_ts.parse::<u64>() {
+                // Already a Unix timestamp
+                source_timestamp_filter.insert("$lte", unix_ts as i64);
+                has_filter = true;
+                info!(
+                    "Applied max_source_timestamp (Unix): {} -> filter: $lte: {}",
+                    max_ts, unix_ts
+                );
+            } else if let Ok(dt) = DateTime::parse_from_rfc3339(max_ts) {
+                // Parse ISO 8601 timestamp and convert to Unix timestamp
+                let unix_ts = dt.timestamp() as u64;
+                source_timestamp_filter.insert("$lte", unix_ts as i64);
+                has_filter = true;
+                info!(
+                    "Applied max_source_timestamp (ISO): {} -> filter: $lte: {}",
+                    max_ts, unix_ts
+                );
+            } else {
+                info!("Invalid max_source_timestamp format: {}", max_ts);
+            }
+        }
+
+        if has_filter {
+            info!(
+                "Final source timestamp filter: {:?}",
+                source_timestamp_filter
+            );
+            filter.insert("source_block_timestamp", source_timestamp_filter);
+            info!("Final complete filter: {:?}", filter);
+        }
     }
 
     // Pagination parameters
@@ -361,10 +426,25 @@ pub async fn get_opportunities(
             network_id,
             status,
             profit_usd,
+            profit_amount: doc.get_str("profit").ok().map(|s| s.to_string()),
             gas_usd,
             created_at: created_at_str,
             source_tx,
             source_block_number,
+            source_block_timestamp: doc.get_i64("source_block_timestamp").ok().and_then(|ts| {
+                DateTime::from_timestamp(ts, 0)
+                    .map(|dt| dt.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+            }),
+            execute_block_number: doc.get_i64("execute_block_number").ok().map(|n| n as u64),
+            execute_block_timestamp: doc.get_i64("execute_block_timestamp").ok().and_then(
+                |block_num| {
+                    // Convert block number to approximate timestamp (assuming 12 second block time)
+                    // This is a rough approximation - in production you might want to use a block timestamp service
+                    let block_time = block_num * 12; // 12 seconds per block
+                    DateTime::from_timestamp(block_time, 0)
+                        .map(|dt| dt.format("%Y-%m-%dT%H:%M:%SZ").to_string())
+                },
+            ),
             profit_token,
             profit_token_name,
             profit_token_symbol,

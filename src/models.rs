@@ -254,10 +254,14 @@ pub struct OpportunityResponse {
     pub network_id: u64,
     pub status: String,
     pub profit_usd: Option<f64>,
+    pub profit_amount: Option<String>, // Profit amount in token's native units
     pub gas_usd: Option<f64>,
     pub created_at: String, // ISO 8601 formatted
     pub source_tx: Option<String>,
     pub source_block_number: Option<u64>,
+    pub source_block_timestamp: Option<String>, // ISO 8601 timestamp when discovered
+    pub execute_block_number: Option<u64>,
+    pub execute_block_timestamp: Option<String>, // ISO 8601 timestamp when executed
     pub profit_token: String,
     pub profit_token_name: Option<String>,
     pub profit_token_symbol: Option<String>,
@@ -295,6 +299,8 @@ pub struct OpportunityQuery {
     pub max_profit_usd: Option<f64>,
     pub min_gas_usd: Option<f64>,
     pub max_gas_usd: Option<f64>,
+    pub min_source_timestamp: Option<String>, // ISO 8601 timestamp (e.g., "2024-01-01T00:00:00Z") or Unix timestamp (e.g., "1704067200")
+    pub max_source_timestamp: Option<String>, // ISO 8601 timestamp (e.g., "2024-01-31T23:59:59Z") or Unix timestamp (e.g., "1706745599")
     pub page: Option<u32>,
     pub limit: Option<u32>,
 }
