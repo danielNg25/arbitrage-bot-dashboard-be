@@ -1,0 +1,27 @@
+# Arbitrage Bot API Configuration (Alternative Location)
+
+[server]
+host = "127.0.0.1"
+port = 8081
+log_level = "debug"
+
+[database]
+uri = "mongodb+srv://evm-dex:UwxjUHqNGhSwJNI6@cluster0.1ndsect.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+database_name = "evm_arbitrage"
+connection_timeout_ms = 10000
+max_pool_size = 5
+
+[cors]
+allowed_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:3001",
+]
+allowed_methods = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+allowed_headers = [
+    "Authorization",
+    "Accept",
+    "Content-Type",
+    "X-Requested-With",
+]
+supports_credentials = true
