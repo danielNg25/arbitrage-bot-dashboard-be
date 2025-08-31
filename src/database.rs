@@ -210,7 +210,6 @@ pub async fn get_opportunities(
     db: &Database,
     network_id: Option<u64>,
     status: Option<String>,
-    statuses: Option<Vec<String>>,
     min_profit_usd: Option<f64>,
     max_profit_usd: Option<f64>,
     min_gas_usd: Option<f64>,
@@ -218,8 +217,6 @@ pub async fn get_opportunities(
     page: Option<u32>,
     limit: Option<u32>,
 ) -> DbResult<crate::models::PaginatedOpportunitiesResponse> {
-    // Prepare statuses for post-filtering
-    let mut post_filter_statuses: Option<Vec<String>> = None;
     let opportunities_collection: Collection<Opportunity> = db.collection("opportunities");
     let _tokens_collection: Collection<crate::models::Token> = db.collection("tokens");
 
@@ -229,45 +226,8 @@ pub async fn get_opportunities(
     if let Some(nid) = network_id {
         filter.insert("network_id", nid as i64);
     }
-
     // Handle status filtering - support both single status and multiple statuses with case-insensitive matching
-    if let Some(statuses) = &statuses {
-        // Multiple statuses - use exact matching for reliability
-        // Convert all statuses to the exact case they appear in the database
-        let exact_statuses: Vec<String> = statuses
-            .iter()
-            .map(|s| {
-                // Map common variations to exact database values
-                match s.to_lowercase().as_str() {
-                    "succeeded" => "PartiallySucceeded".to_string(), // Map succeeded to PartiallySucceeded since Succeeded doesn't exist
-                    "partiallysucceeded" => "PartiallySucceeded".to_string(),
-                    "reverted" => "Reverted".to_string(),
-                    "error" => "Error".to_string(),
-                    "skipped" => "Skipped".to_string(),
-                    _ => s.clone(), // Keep original if no mapping found
-                }
-            })
-            .collect();
-
-        // Remove duplicates and filter out empty statuses
-        let mut unique_statuses: Vec<String> = exact_statuses
-            .into_iter()
-            .filter(|s| !s.is_empty())
-            .collect();
-        unique_statuses.sort();
-        unique_statuses.dedup();
-
-        if !unique_statuses.is_empty() {
-            // Store the statuses for post-filtering since MongoDB $in is not working correctly
-            post_filter_statuses = Some(unique_statuses.clone());
-            info!(
-                "Will apply post-filtering for statuses: {:?} -> {:?}",
-                statuses, unique_statuses
-            );
-        } else {
-            info!("No valid statuses found in filter: {:?}", statuses);
-        }
-    } else if let Some(s) = &status {
+    else if let Some(s) = &status {
         // Single status - use case-insensitive regex matching
         let status_regex = format!("^{}$", regex::escape(s));
         filter.insert(
@@ -412,35 +372,6 @@ pub async fn get_opportunities(
         };
 
         opportunities.push(response);
-    }
-
-    // Apply post-filtering for statuses if needed
-    if let Some(ref filter_statuses) = post_filter_statuses {
-        let original_count = opportunities.len();
-        opportunities.retain(|opp| filter_statuses.contains(&opp.status));
-        let filtered_count = opportunities.len();
-        info!(
-            "Post-filtered opportunities: {} -> {} (filter: {:?})",
-            original_count, filtered_count, filter_statuses
-        );
-
-        // Recalculate pagination for filtered results
-        let total = opportunities.len() as u64;
-        let total_pages = ((total as f64) / (limit as f64)).ceil() as u32;
-
-        let pagination = crate::models::PaginationInfo {
-            page,
-            limit,
-            total,
-            total_pages,
-            has_next: page < total_pages,
-            has_prev: page > 1,
-        };
-
-        return Ok(crate::models::PaginatedOpportunitiesResponse {
-            opportunities,
-            pagination,
-        });
     }
 
     let pagination = crate::models::PaginationInfo {

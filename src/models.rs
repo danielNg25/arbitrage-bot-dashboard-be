@@ -290,9 +290,7 @@ pub struct ProfitOverTimeResponse {
 #[derive(Debug, Deserialize)]
 pub struct OpportunityQuery {
     pub network_id: Option<u64>,
-    pub status: Option<String>, // Single status (backward compatibility)
-    #[serde(rename = "statuses[]")]
-    pub statuses: Option<Vec<String>>, // Multiple statuses (new feature)
+    pub status: Option<String>,
     pub min_profit_usd: Option<f64>,
     pub max_profit_usd: Option<f64>,
     pub min_gas_usd: Option<f64>,

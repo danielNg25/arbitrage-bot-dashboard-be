@@ -15,11 +15,10 @@ The `/api/v1/opportunities` endpoint provides comprehensive access to arbitrage 
 
 ### Core Filtering Parameters
 
-| Parameter    | Type       | Required | Default | Description                                       |
-| ------------ | ---------- | -------- | ------- | ------------------------------------------------- |
-| `network_id` | `u64`      | No       | -       | Filter by specific blockchain network chain ID    |
-| `status`     | `string`   | No       | -       | Filter by single opportunity execution status     |
-| `statuses`   | `string[]` | No       | -       | Filter by multiple opportunity execution statuses |
+| Parameter    | Type     | Required | Default | Description                                    |
+| ------------ | -------- | -------- | ------- | ---------------------------------------------- |
+| `network_id` | `u64`    | No       | -       | Filter by specific blockchain network chain ID |
+| `status`     | `string` | No       | -       | Filter by single opportunity execution status  |
 
 ### Profit Range Filtering
 
@@ -115,9 +114,8 @@ The `status` field can contain the following values (based on actual database da
 **Note:**
 
 -   The actual status values in the database use Title Case formatting
--   **Case-Insensitive Support**: The API supports both uppercase and lowercase forms for **both single and multiple status filtering**
+-   **Case-Insensitive Support**: The API supports both uppercase and lowercase forms for single status filtering
 -   Single status: `"error"`, `"Error"`, `"ERROR"` all work
--   Multiple statuses: `"error"`, `"Error"`, `"ERROR"` all work in any combination
 -   **Important**: Status "succeeded" does not exist in the current database - use "PartiallySucceeded" instead
 
 ## Complete API Examples
@@ -213,37 +211,20 @@ curl "http://localhost:8081/api/v1/opportunities?status=Reverted&network_id=252&
 curl "http://localhost:8081/api/v1/opportunities?status=reverted&network_id=252&limit=20"
 ```
 
-### Multiple Status Filtering
-
-```bash
-# Filter by multiple statuses (Error OR PartiallySucceeded) - Case-insensitive
-curl "http://localhost:8081/api/v1/opportunities?statuses=Error&statuses=PartiallySucceeded&limit=10"
-curl "http://localhost:8081/api/v1/opportunities?statuses=error&statuses=partiallysucceeded&limit=10"
-curl "http://localhost:8081/api/v1/opportunities?statuses=ERROR&statuses=PartiallySucceeded&limit=10"
-
-# Filter by multiple statuses (Error OR Reverted OR Skipped) - Case-insensitive
-curl "http://localhost:8081/api/v1/opportunities?statuses=Error&statuses=Reverted&statuses=Skipped&limit=15"
-curl "http://localhost:8081/api/v1/opportunities?statuses=error&statuses=reverted&statuses=skipped&limit=15"
-
-# Filter by multiple statuses with network - Case-insensitive
-curl "http://localhost:8081/api/v1/opportunities?statuses=PartiallySucceeded&statuses=Error&network_id=252&limit=25"
-curl "http://localhost:8081/api/v1/opportunities?statuses=partiallysucceeded&statuses=error&network_id=252&limit=25"
-```
-
 ### Combined Filtering Examples
 
 ```bash
-# Multiple statuses + profit range + pagination - Case-insensitive
-curl "http://localhost:8081/api/v1/opportunities?statuses=PartiallySucceeded&statuses=Error&min_profit_usd=0.01&page=1&limit=50"
-curl "http://localhost:8081/api/v1/opportunities?statuses=partiallysucceeded&statuses=error&min_profit_usd=0.01&page=1&limit=50"
+# Single status + profit range + pagination - Case-insensitive
+curl "http://localhost:8081/api/v1/opportunities?status=PartiallySucceeded&min_profit_usd=0.01&page=1&limit=50"
+curl "http://localhost:8081/api/v1/opportunities?status=partiallysucceeded&min_profit_usd=0.01&page=1&limit=50"
 
-# Multiple statuses + gas cost range + network - Case-insensitive
-curl "http://localhost:8081/api/v1/opportunities?statuses=Error&statuses=Reverted&min_gas_usd=0.001&max_gas_usd=0.01&network_id=252&limit=100"
-curl "http://localhost:8081/api/v1/opportunities?statuses=error&statuses=reverted&min_gas_usd=0.001&max_gas_usd=0.01&network_id=252&limit=100"
+# Single status + gas cost range + network - Case-insensitive
+curl "http://localhost:8081/api/v1/opportunities?status=Error&min_gas_usd=0.001&max_gas_usd=0.01&network_id=252&limit=100"
+curl "http://localhost:8081/api/v1/opportunities?status=error&min_gas_usd=0.001&max_gas_usd=0.01&network_id=252&limit=100"
 
 # Complex combination - Case-insensitive
-curl "http://localhost:8081/api/v1/opportunities?statuses=PartiallySucceeded&statuses=Error&min_profit_usd=0.01&max_profit_usd=1.0&min_gas_usd=0.001&network_id=252&page=1&limit=200"
-curl "http://localhost:8081/api/v1/opportunities?statuses=partiallysucceeded&statuses=error&min_profit_usd=0.01&max_profit_usd=1.0&min_gas_usd=0.001&network_id=252&page=1&limit=200"
+curl "http://localhost:8081/api/v1/opportunities?status=PartiallySucceeded&min_profit_usd=0.01&max_profit_usd=1.0&min_gas_usd=0.001&network_id=252&page=1&limit=200"
+curl "http://localhost:8081/api/v1/opportunities?status=partiallysucceeded&min_profit_usd=0.01&max_profit_usd=1.0&min_gas_usd=0.001&network_id=252&page=1&limit=200"
 ```
 
 ## Response Examples
@@ -293,24 +274,6 @@ curl "http://localhost:8081/api/v1/opportunities?statuses=partiallysucceeded&sta
 
 ## URL Parameter Format
 
-### Array Parameters (Multiple Statuses)
-
-When using the `statuses` parameter for multiple status filtering, use the following format:
-
-```bash
-# Recommended format for multiple statuses (most reliable)
-curl "http://localhost:8081/api/v1/opportunities?statuses=Error&statuses=PartiallySucceeded"
-
-# Alternative format (may have parsing issues in some environments)
-curl "http://localhost:8081/api/v1/opportunities?statuses[]=Error&statuses[]=PartiallySucceeded"
-```
-
-**Note:**
-
--   The recommended format uses repeated `statuses=` parameters without `[]` notation
--   The `[]` notation in the parameter name (`statuses[]`) is the standard way to represent arrays in URLs but may have compatibility issues
--   Both formats support case-insensitive status values
-
 ### Case-Insensitive Status Filtering
 
 The API supports case-insensitive status filtering for single status queries:
@@ -322,8 +285,6 @@ curl "http://localhost:8081/api/v1/opportunities?status=error&limit=5"
 curl "http://localhost:8081/api/v1/opportunities?status=ERROR&limit=5"
 curl "http://localhost:8081/api/v1/opportunities?status=ErRoR&limit=5"
 ```
-
-**Important:** Multiple status filtering (`statuses[]`) requires exact case matching for optimal performance.
 
 ## Technical Implementation Details
 

@@ -38,7 +38,6 @@ pub async fn get_opportunities_handler(
         &db,
         query.network_id,
         query.status.clone(),
-        query.statuses.clone(),
         query.min_profit_usd,
         query.max_profit_usd,
         query.min_gas_usd,
