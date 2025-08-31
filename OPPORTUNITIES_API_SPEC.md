@@ -272,6 +272,7 @@ curl "http://localhost:8081/api/v1/opportunities?status=partiallysucceeded&min_p
 {
     "opportunities": [
         {
+            "id": "68b45589fa99519f09784f84",
             "network_id": 1,
             "status": "succeeded",
             "profit_usd": 25.5,
@@ -285,6 +286,7 @@ curl "http://localhost:8081/api/v1/opportunities?status=partiallysucceeded&min_p
             "profit_token_decimals": 6
         },
         {
+            "id": "68b45589fa99519f09784f85",
             "network_id": 14,
             "status": "partially_succeeded",
             "profit_usd": 12.75,

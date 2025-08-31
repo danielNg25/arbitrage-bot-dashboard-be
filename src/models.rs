@@ -235,6 +235,7 @@ pub enum PoolType {
 // Response models for API endpoints
 #[derive(Debug, Serialize)]
 pub struct NetworkResponse {
+    pub id: String, // MongoDB ObjectId as string
     pub chain_id: u64,
     pub name: String,
     pub rpc: Option<String>,
@@ -251,6 +252,7 @@ pub struct NetworkResponse {
 
 #[derive(Debug, Serialize)]
 pub struct OpportunityResponse {
+    pub id: String, // MongoDB ObjectId as string
     pub network_id: u64,
     pub status: String,
     pub profit_usd: Option<f64>,
@@ -327,6 +329,7 @@ pub struct OpportunityDetailsResponse {
 /// Token Response for opportunity details
 #[derive(Debug, Serialize)]
 pub struct TokenResponse {
+    pub id: String, // MongoDB ObjectId as string
     pub address: String,
     pub name: Option<String>,
     pub symbol: Option<String>,
@@ -337,6 +340,7 @@ pub struct TokenResponse {
 /// Pool Response for opportunity details
 #[derive(Debug, Serialize)]
 pub struct PoolResponse {
+    pub id: String, // MongoDB ObjectId as string
     pub address: String,
     pub pool_type: String,
     pub tokens: Vec<String>,

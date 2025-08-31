@@ -59,6 +59,7 @@ pub async fn get_networks_with_stats(
             };
 
         let response = crate::models::NetworkResponse {
+            id: network.id.map(|id| id.to_hex()).unwrap_or_default(),
             chain_id: network.chain_id,
             name: network.name,
             rpc: network.rpc,
@@ -293,6 +294,10 @@ pub async fn get_opportunities(
             .to_string();
 
         let response = crate::models::OpportunityResponse {
+            id: doc
+                .get_object_id("_id")
+                .map(|id| id.to_hex())
+                .unwrap_or_default(),
             network_id,
             status,
             profit_usd,
@@ -452,6 +457,7 @@ pub async fn get_opportunity_details(
                             token.address, token.name, token.symbol
                         );
                         path_tokens.push(crate::models::TokenResponse {
+                            id: token.id.map(|id| id.to_hex()).unwrap_or_default(),
                             address: token.address,
                             name: token.name,
                             symbol: token.symbol,
@@ -462,6 +468,7 @@ pub async fn get_opportunity_details(
                         info!("Token not found for address: {}", address_lower);
                         // Token not found, create a basic response
                         path_tokens.push(crate::models::TokenResponse {
+                            id: "".to_string(), // No ID for tokens not found in database
                             address: address.clone(),
                             name: None,
                             symbol: None,
@@ -491,6 +498,7 @@ pub async fn get_opportunity_details(
                             pool.address, pool.pool_type, pool.tokens
                         );
                         path_pools.push(crate::models::PoolResponse {
+                            id: pool.id.map(|id| id.to_hex()).unwrap_or_default(),
                             address: pool.address,
                             pool_type: pool.pool_type,
                             tokens: pool.tokens,
@@ -499,6 +507,7 @@ pub async fn get_opportunity_details(
                         info!("Pool not found for address: {}", address_lower);
                         // Pool not found, create a basic response
                         path_pools.push(crate::models::PoolResponse {
+                            id: "".to_string(), // No ID for pools not found in database
                             address: address.clone(),
                             pool_type: "Unknown".to_string(),
                             tokens: Vec::new(),
@@ -511,6 +520,7 @@ pub async fn get_opportunity_details(
 
     // Build the opportunity response
     let opportunity_response = crate::models::OpportunityResponse {
+        id: opportunity.id.map(|id| id.to_hex()).unwrap_or_default(),
         network_id: opportunity.network_id,
         status: opportunity.status.clone(),
         profit_usd: opportunity.profit_usd,
@@ -542,6 +552,7 @@ pub async fn get_opportunity_details(
     };
 
     let network_response = crate::models::NetworkResponse {
+        id: network.id.map(|id| id.to_hex()).unwrap_or_default(),
         chain_id: network.chain_id,
         name: network.name.clone(),
         rpc: network.rpc.clone(),
