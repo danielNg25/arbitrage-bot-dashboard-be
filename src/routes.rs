@@ -1,7 +1,7 @@
 use actix_web::web;
 
 use crate::handlers::{
-    get_networks, get_opportunities_handler, get_profit_over_time_handler, health_check,
+    get_networks, get_opportunities_handler, get_opportunity_details_handler, get_profit_over_time_handler, health_check,
 };
 
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
@@ -13,6 +13,10 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
             .route(
                 "/opportunities/profit-over-time",
                 web::get().to(get_profit_over_time_handler),
+            )
+            .route(
+                "/opportunities/{id}",
+                web::get().to(get_opportunity_details_handler),
             ),
     );
 }

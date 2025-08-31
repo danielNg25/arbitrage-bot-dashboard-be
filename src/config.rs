@@ -37,7 +37,7 @@ impl Default for Config {
         Self {
             server: ServerConfig {
                 host: "127.0.0.1".to_string(),
-                port: 8080,
+                port: 8081,
                 log_level: "info".to_string(),
             },
             database: DatabaseConfig {
@@ -136,7 +136,7 @@ mod tests {
     fn test_config_default() {
         let config = Config::default();
         assert_eq!(config.server.host, "127.0.0.1");
-        assert_eq!(config.server.port, 8080);
+        assert_eq!(config.server.port, 8081);
         assert_eq!(config.database.uri, "mongodb://localhost:27017");
         assert_eq!(config.database.database_name, "arbitrage_bot");
     }
@@ -160,7 +160,7 @@ mod tests {
         let config = Config::default();
         let toml_string = toml::to_string_pretty(&config).unwrap();
         assert!(toml_string.contains("127.0.0.1"));
-        assert!(toml_string.contains("8080"));
+        assert!(toml_string.contains("8081"));
         assert!(toml_string.contains("mongodb://localhost:27017"));
     }
 }

@@ -94,3 +94,29 @@ pub async fn health_check() -> Result<HttpResponse, ApiError> {
         "timestamp": chrono::Utc::now().to_rfc3339()
     })))
 }
+
+/// GET /opportunities/{id} - Returns detailed opportunity information
+pub async fn get_opportunity_details_handler(
+    path: web::Path<String>,
+    db: web::Data<Database>,
+) -> Result<HttpResponse, ApiError> {
+    let opportunity_id = path.into_inner();
+    info!("Handling GET /opportunities/{} request", opportunity_id);
+
+    match crate::database::get_opportunity_details(&db, &opportunity_id).await {
+        Ok(Some(details)) => {
+            info!("Successfully retrieved opportunity details for ID: {}", opportunity_id);
+            Ok(HttpResponse::Ok().json(details))
+        }
+        Ok(None) => {
+            info!("Opportunity not found for ID: {}", opportunity_id);
+            Err(ApiError::NotFound(
+                "Opportunity not found".to_string(),
+            ))
+        }
+        Err(e) => {
+            error!("Database error while fetching opportunity details: {}", e);
+            Err(ApiError::DatabaseError(e.to_string()))
+        }
+    }
+}

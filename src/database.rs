@@ -375,3 +375,202 @@ pub async fn get_profit_over_time(
 
     Ok(results)
 }
+
+pub async fn get_opportunity_details(
+    db: &Database,
+    opportunity_id: &str,
+) -> DbResult<Option<crate::models::OpportunityDetailsResponse>> {
+    let opportunities_collection: Collection<Opportunity> = db.collection("opportunities");
+    let networks_collection: Collection<Network> = db.collection("networks");
+    let tokens_collection: Collection<crate::models::Token> = db.collection("tokens");
+    let pools_collection: Collection<crate::models::Pool> = db.collection("pools");
+    let debug_collection: Collection<crate::models::OpportunityDebug> =
+        db.collection("opportunity_debug");
+
+    // Parse the opportunity ID
+    let object_id = match bson::oid::ObjectId::parse_str(opportunity_id) {
+        Ok(id) => id,
+        Err(_) => return Ok(None), // Invalid ID format
+    };
+
+    // Get the opportunity
+    let opportunity = match opportunities_collection
+        .find_one(doc! { "_id": object_id }, None)
+        .await?
+    {
+        Some(opp) => opp,
+        None => return Ok(None), // Opportunity not found
+    };
+
+    // Get the network
+    let network = match networks_collection
+        .find_one(doc! { "chain_id": opportunity.network_id as i64 }, None)
+        .await?
+    {
+        Some(net) => net,
+        None => return Ok(None), // Network not found
+    };
+
+    // Get the debug info to extract the path
+    let debug_info = debug_collection
+        .find_one(doc! { "_id": object_id }, None)
+        .await?;
+
+    let mut path_tokens = Vec::new();
+    let mut path_pools = Vec::new();
+
+    if let Some(debug) = debug_info {
+        if let Some(path) = debug.path {
+            // Process the path: even indices are tokens, odd indices are pools
+            info!("Processing path with {} elements", path.len());
+            for (index, address) in path.iter().enumerate() {
+                info!(
+                    "Path element {}: {} (type: {})",
+                    index,
+                    address,
+                    if index % 2 == 0 { "token" } else { "pool" }
+                );
+                if index % 2 == 0 {
+                    // Token - fetch token details
+                    let address_lower = address.to_lowercase();
+                    info!(
+                        "Querying token with network_id: {}, address: {} (lowercase: {})",
+                        opportunity.network_id, address, address_lower
+                    );
+                    if let Some(token) = tokens_collection
+                        .find_one(
+                            doc! {
+                                "network_id": opportunity.network_id as i64,
+                                "address": &address_lower
+                            },
+                            None,
+                        )
+                        .await?
+                    {
+                        info!(
+                            "Found token: {} - name: {:?}, symbol: {:?}",
+                            token.address, token.name, token.symbol
+                        );
+                        path_tokens.push(crate::models::TokenResponse {
+                            address: token.address,
+                            name: token.name,
+                            symbol: token.symbol,
+                            decimals: token.decimals,
+                            price: token.price,
+                        });
+                    } else {
+                        info!("Token not found for address: {}", address_lower);
+                        // Token not found, create a basic response
+                        path_tokens.push(crate::models::TokenResponse {
+                            address: address.clone(),
+                            name: None,
+                            symbol: None,
+                            decimals: None,
+                            price: None,
+                        });
+                    }
+                } else {
+                    // Pool - fetch pool details
+                    let address_lower = address.to_lowercase();
+                    info!(
+                        "Querying pool with network_id: {}, address: {} (lowercase: {})",
+                        opportunity.network_id, address, address_lower
+                    );
+                    if let Some(pool) = pools_collection
+                        .find_one(
+                            doc! {
+                                "network_id": opportunity.network_id as i64,
+                                "address": &address_lower
+                            },
+                            None,
+                        )
+                        .await?
+                    {
+                        info!(
+                            "Found pool: {} - type: {}, tokens: {:?}",
+                            pool.address, pool.pool_type, pool.tokens
+                        );
+                        path_pools.push(crate::models::PoolResponse {
+                            address: pool.address,
+                            pool_type: pool.pool_type,
+                            tokens: pool.tokens,
+                        });
+                    } else {
+                        info!("Pool not found for address: {}", address_lower);
+                        // Pool not found, create a basic response
+                        path_pools.push(crate::models::PoolResponse {
+                            address: address.clone(),
+                            pool_type: "Unknown".to_string(),
+                            tokens: Vec::new(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // Build the opportunity response
+    let opportunity_response = crate::models::OpportunityResponse {
+        network_id: opportunity.network_id,
+        status: opportunity.status.clone(),
+        profit_usd: opportunity.profit_usd,
+        profit_amount: opportunity.profit.clone(),
+        gas_usd: opportunity.gas_usd,
+        created_at: DateTime::from_timestamp(opportunity.created_at as i64, 0)
+            .unwrap_or_else(|| Utc::now())
+            .format("%Y-%m-%dT%H:%M:%SZ")
+            .to_string(),
+        source_tx: opportunity.source_tx.clone(),
+        source_block_number: opportunity.source_block_number,
+        execute_block_number: opportunity.execute_block_number,
+        profit_token: opportunity.profit_token.clone(),
+        profit_token_name: None, // Will be populated if profit_token is in path_tokens
+        profit_token_symbol: None, // Will be populated if profit_token is in path_tokens
+        profit_token_decimals: None, // Will be populated if profit_token is in path_tokens
+    };
+
+    // Build the network response
+    let success_rate = if let (Some(executed), Some(success)) = (network.executed, network.success)
+    {
+        if executed > 0 {
+            Some(success as f64 / executed as f64)
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    let network_response = crate::models::NetworkResponse {
+        chain_id: network.chain_id,
+        name: network.name.clone(),
+        rpc: network.rpc.clone(),
+        block_explorer: network.block_explorer.clone(),
+        executed: network.executed,
+        success: network.success,
+        failed: network.failed,
+        total_profit_usd: network.total_profit_usd,
+        total_gas_usd: network.total_gas_usd,
+        last_proccesed_created_at: network.last_proccesed_created_at,
+        created_at: network.created_at,
+        success_rate,
+    };
+
+    // Populate profit token details if it's in the path
+    let mut final_opportunity_response = opportunity_response;
+    if let Some(token_info) = path_tokens
+        .iter()
+        .find(|t| t.address == opportunity.profit_token)
+    {
+        final_opportunity_response.profit_token_name = token_info.name.clone();
+        final_opportunity_response.profit_token_symbol = token_info.symbol.clone();
+        final_opportunity_response.profit_token_decimals = token_info.decimals;
+    }
+
+    Ok(Some(crate::models::OpportunityDetailsResponse {
+        opportunity: final_opportunity_response,
+        network: network_response,
+        path_tokens,
+        path_pools,
+    }))
+}

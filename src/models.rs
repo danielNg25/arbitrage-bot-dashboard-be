@@ -187,7 +187,7 @@ pub struct OpportunityDebug {
     pub simulation_time: Option<u64>,
     pub error: Option<String>,
     pub gas_amount: Option<u64>,
-    pub gas_price: Option<u128>,
+    pub gas_price: Option<u64>,
     pub created_at: u64,
     pub updated_at: u64,
 }
@@ -200,7 +200,7 @@ impl OpportunityDebug {
         path: Option<Vec<String>>,
         error: Option<String>,
         gas_amount: Option<u64>,
-        gas_price: Option<u128>,
+        gas_price: Option<u64>,
         received_at: Option<u64>,
         send_at: Option<u64>,
         simulation_time: Option<u64>,
@@ -306,16 +306,38 @@ pub struct OpportunityQuery {
 /// Opportunity Debug model for MongoDB (debug data)
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct CountedTx {
-    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
-    pub id: Option<bson::oid::ObjectId>,
     pub tx_hash: String,
 }
 
 impl CountedTx {
-    pub fn new(opportunity_id: &str, tx_hash: String) -> Self {
-        Self {
-            id: Some(bson::oid::ObjectId::parse_str(opportunity_id).unwrap()),
-            tx_hash,
-        }
+    pub fn new(_opportunity_id: &str, tx_hash: String) -> Self {
+        Self { tx_hash }
     }
+}
+
+/// Opportunity Details Response - includes opportunity, network, tokens, and pools
+#[derive(Debug, Serialize)]
+pub struct OpportunityDetailsResponse {
+    pub opportunity: OpportunityResponse,
+    pub network: NetworkResponse,
+    pub path_tokens: Vec<TokenResponse>,
+    pub path_pools: Vec<PoolResponse>,
+}
+
+/// Token Response for opportunity details
+#[derive(Debug, Serialize)]
+pub struct TokenResponse {
+    pub address: String,
+    pub name: Option<String>,
+    pub symbol: Option<String>,
+    pub decimals: Option<u8>,
+    pub price: Option<f64>,
+}
+
+/// Pool Response for opportunity details
+#[derive(Debug, Serialize)]
+pub struct PoolResponse {
+    pub address: String,
+    pub pool_type: String,
+    pub tokens: Vec<String>,
 }
