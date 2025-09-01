@@ -1,10 +1,11 @@
 pub mod config;
-pub mod models;
-pub mod utils;
 pub mod database;
-pub mod handlers;
-pub mod routes;
 pub mod errors;
+pub mod handlers;
+pub mod indexer;
+pub mod models;
+pub mod routes;
+pub mod utils;
 
 #[cfg(test)]
 mod tests {

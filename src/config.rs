@@ -7,6 +7,7 @@ pub struct Config {
     pub server: ServerConfig,
     pub database: DatabaseConfig,
     pub cors: CorsConfig,
+    pub indexer: IndexerConfig,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -30,6 +31,11 @@ pub struct CorsConfig {
     pub allowed_methods: Vec<String>,
     pub allowed_headers: Vec<String>,
     pub supports_credentials: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct IndexerConfig {
+    pub interval_minutes: u64,
 }
 
 impl Default for Config {
@@ -60,6 +66,9 @@ impl Default for Config {
                     "Content-Type".to_string(),
                 ],
                 supports_credentials: true,
+            },
+            indexer: IndexerConfig {
+                interval_minutes: 5,
             },
         }
     }

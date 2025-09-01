@@ -20,6 +20,7 @@ pub struct Network {
     pub total_profit_usd: f64,
     pub total_gas_usd: f64,
     pub last_proccesed_created_at: Option<u64>,
+    pub last_processed_id: Option<String>,
     pub created_at: u64,
 }
 
@@ -37,6 +38,7 @@ impl Network {
             total_profit_usd: 0.0,
             total_gas_usd: 0.0,
             last_proccesed_created_at: None,
+            last_processed_id: None,
             created_at: Utc::now().timestamp() as u64,
         }
     }
@@ -111,7 +113,7 @@ impl Pool {
     }
 }
 
-/// Opportunity model for MongoDB (important data)
+/// Unified Opportunity model for MongoDB (combines important data and debug data)
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Opportunity {
     #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
@@ -130,6 +132,16 @@ pub struct Opportunity {
     pub profit_usd: Option<f64>,
     pub gas_token_amount: Option<String>,
     pub gas_usd: Option<f64>,
+    // Debug fields
+    pub estimate_profit: Option<String>,
+    pub estimate_profit_usd: Option<f64>,
+    pub path: Option<Vec<String>>,
+    pub received_at: Option<u64>,
+    pub send_at: Option<u64>,
+    pub simulation_time: Option<u64>,
+    pub error: Option<String>,
+    pub gas_amount: Option<u64>,
+    pub gas_price: Option<u64>,
     pub created_at: u64,
     pub updated_at: u64,
 }
@@ -168,60 +180,23 @@ impl Opportunity {
             gas_token_amount,
             gas_usd,
             amount: u256_to_string(amount),
+            // Debug fields initialized to None
+            estimate_profit: None,
+            estimate_profit_usd: None,
+            path: None,
+            received_at: None,
+            send_at: None,
+            simulation_time: None,
+            error: None,
+            gas_amount: None,
+            gas_price: None,
             created_at: now,
             updated_at: now,
         }
     }
 }
 
-/// Opportunity Debug model for MongoDB (debug data)
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct OpportunityDebug {
-    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
-    pub id: Option<bson::oid::ObjectId>,
-    pub estimate_profit: Option<String>,
-    pub estimate_profit_usd: Option<f64>,
-    pub path: Option<Vec<String>>,
-    pub received_at: Option<u64>,
-    pub send_at: Option<u64>,
-    pub simulation_time: Option<u64>,
-    pub error: Option<String>,
-    pub gas_amount: Option<u64>,
-    pub gas_price: Option<u64>,
-    pub created_at: u64,
-    pub updated_at: u64,
-}
-
-impl OpportunityDebug {
-    pub fn new(
-        opportunity_id: &str,
-        estimate_profit: Option<String>,
-        estimate_profit_usd: Option<f64>,
-        path: Option<Vec<String>>,
-        error: Option<String>,
-        gas_amount: Option<u64>,
-        gas_price: Option<u64>,
-        received_at: Option<u64>,
-        send_at: Option<u64>,
-        simulation_time: Option<u64>,
-    ) -> Self {
-        let now = Utc::now().timestamp() as u64;
-        Self {
-            id: Some(bson::oid::ObjectId::parse_str(opportunity_id).unwrap()),
-            estimate_profit,
-            estimate_profit_usd,
-            path,
-            received_at,
-            send_at,
-            simulation_time,
-            error,
-            gas_amount,
-            gas_price,
-            created_at: now,
-            updated_at: now,
-        }
-    }
-}
+// OpportunityDebug model removed - now integrated into unified Opportunity model
 
 pub enum PoolType {
     /// Uniswap V2-compatible pool (constant product formula)
@@ -256,7 +231,9 @@ pub struct OpportunityResponse {
     pub network_id: u64,
     pub status: String,
     pub profit_usd: Option<f64>,
-    pub profit_amount: Option<String>, // Profit amount in token's native units
+    pub estimate_profit_usd: Option<f64>, // Estimated profit from debug data
+    pub estimate_profit: Option<String>,  // Raw profit amount from debug data
+    pub profit_amount: Option<String>,    // Profit amount in token's native units
     pub gas_usd: Option<f64>,
     pub created_at: String, // ISO 8601 formatted
     pub source_tx: Option<String>,
@@ -266,6 +243,8 @@ pub struct OpportunityResponse {
     pub profit_token_name: Option<String>,
     pub profit_token_symbol: Option<String>,
     pub profit_token_decimals: Option<u8>,
+    pub simulation_time: Option<u64>, // Simulation time in milliseconds
+    pub error: Option<String>,        // Error message if any
 }
 
 #[derive(Debug, Serialize)]

@@ -5,6 +5,7 @@ use mongodb::Database;
 use crate::{
     database::{get_networks_with_stats, get_opportunities, get_profit_over_time},
     errors::ApiError,
+    indexer::Indexer,
     models::OpportunityQuery,
 };
 
@@ -149,6 +150,30 @@ pub async fn get_opportunity_details_by_tx_handler(
                 "Database error while fetching opportunity details by tx hash: {}",
                 e
             );
+            Err(ApiError::DatabaseError(e.to_string()))
+        }
+    }
+}
+
+/// POST /admin/index - Triggers manual indexing of network and token metrics
+pub async fn trigger_indexing_handler(db: web::Data<Database>) -> Result<HttpResponse, ApiError> {
+    info!("Handling POST /admin/index request - triggering manual indexing");
+
+    // Create a temporary indexer instance for manual run
+    let db_arc = std::sync::Arc::new(db.get_ref().clone());
+    let _indexer = Indexer::new(db_arc.clone(), 5); // Default interval for manual runs
+
+    match Indexer::run_manual_indexing(&db_arc).await {
+        Ok(_) => {
+            info!("Manual indexing completed successfully");
+            Ok(HttpResponse::Ok().json(serde_json::json!({
+                "status": "success",
+                "message": "Indexing completed successfully",
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            })))
+        }
+        Err(e) => {
+            error!("Manual indexing failed: {}", e);
             Err(ApiError::DatabaseError(e.to_string()))
         }
     }

@@ -102,9 +102,12 @@ interface PaginatedOpportunitiesResponse {
 
 ```typescript
 interface OpportunityResponse {
+    id: string; // MongoDB ObjectId as string
     network_id: number; // Blockchain network chain ID
     status: string; // Execution status (e.g., "succeeded", "reverted")
     profit_usd: number | null; // Profit amount in USD (null if not available)
+    estimate_profit_usd: number | null; // Estimated profit in USD from debug data (null if not available)
+    estimate_profit: string | null; // Raw profit amount from debug data (null if not available)
     profit_amount: string | null; // Profit amount in token's native units (null if not available)
     gas_usd: number | null; // Gas cost in USD (null if not available)
     created_at: string; // ISO 8601 timestamp (YYYY-MM-DDTHH:MM:SSZ)
@@ -115,6 +118,8 @@ interface OpportunityResponse {
     profit_token_name: string | null; // Profit token name (null if not available)
     profit_token_symbol: string | null; // Profit token symbol (null if not available)
     profit_token_decimals: number | null; // Profit token decimals (null if not available)
+    simulation_time: number | null; // Simulation time in milliseconds (null if not available)
+    error: string | null; // Error message if any (null if not available)
 }
 ```
 
@@ -130,6 +135,14 @@ interface PaginationInfo {
     has_prev: boolean; // Whether previous page exists
 }
 ```
+
+## Unified Data Model
+
+The API now uses a unified `Opportunity` model that combines both the core opportunity data and debug information in a single collection. This provides:
+
+-   **Better Performance**: No need for complex joins between multiple collections
+-   **Consistent Data**: All opportunity information is available in one place
+-   **Real-time Updates**: Debug data is updated alongside opportunity data
 
 ## Status Values
 

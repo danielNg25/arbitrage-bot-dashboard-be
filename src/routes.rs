@@ -3,6 +3,7 @@ use actix_web::web;
 use crate::handlers::{
     get_networks, get_opportunities_handler, get_opportunity_details_by_tx_handler,
     get_opportunity_details_handler, get_profit_over_time_handler, health_check,
+    trigger_indexing_handler,
 };
 
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
@@ -22,6 +23,7 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
             .route(
                 "/opportunities/{id}",
                 web::get().to(get_opportunity_details_handler),
-            ),
+            )
+            .route("/admin/index", web::post().to(trigger_indexing_handler)),
     );
 }

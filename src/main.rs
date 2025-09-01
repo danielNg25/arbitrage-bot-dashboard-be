@@ -6,12 +6,14 @@ mod config;
 mod database;
 mod errors;
 mod handlers;
+mod indexer;
 mod models;
 mod routes;
 mod utils;
 
 use config::Config;
 use database::init_database;
+use indexer::Indexer;
 use routes::configure_routes;
 
 #[actix_web::main]
@@ -29,6 +31,15 @@ async fn main() -> std::io::Result<()> {
     let db = init_database(&config.database)
         .await
         .expect("Failed to initialize database");
+
+    // Start the background indexer
+    let db_arc = std::sync::Arc::new(db.clone());
+    let indexer = Indexer::new(db_arc, config.indexer.interval_minutes);
+    indexer.start().await;
+    info!(
+        "Background indexer started ({} minute interval)",
+        config.indexer.interval_minutes
+    );
 
     // Build bind address from config
     let bind_addr = format!("{}:{}", config.server.host, config.server.port);

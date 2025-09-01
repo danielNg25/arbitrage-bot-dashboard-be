@@ -25,3 +25,6 @@ allowed_headers = [
     "X-Requested-With",
 ]
 supports_credentials = true
+
+[indexer]
+interval_minutes = 5
