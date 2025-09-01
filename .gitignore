@@ -24,3 +24,5 @@ Thumbs.db
 # Build artifacts
 dist/
 build/
+
+config/config.toml
