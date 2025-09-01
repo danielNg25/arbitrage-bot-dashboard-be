@@ -36,6 +36,7 @@ pub struct CorsConfig {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct IndexerConfig {
     pub interval_minutes: u64,
+    pub hourly_data_retention_hours: u64,
 }
 
 impl Default for Config {
@@ -69,6 +70,7 @@ impl Default for Config {
             },
             indexer: IndexerConfig {
                 interval_minutes: 5,
+                hourly_data_retention_hours: 168, // 7 days * 24 hours
             },
         }
     }

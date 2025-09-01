@@ -1057,6 +1057,58 @@ pub async fn upsert_time_aggregation(
     Ok(())
 }
 
+/// Prune old hourly data based on retention period
+pub async fn prune_old_hourly_data(db: &Database, retention_hours: u64) -> DbResult<()> {
+    let time_aggregations_collection: Collection<TimeAggregation> =
+        db.collection("time_aggregations");
+    let summary_aggregations_collection: Collection<SummaryAggregation> =
+        db.collection("summary_aggregations");
+
+    // Calculate cutoff timestamp (retention_hours ago)
+    let cutoff_timestamp = Utc::now()
+        .checked_sub_signed(chrono::Duration::hours(retention_hours as i64))
+        .unwrap_or(Utc::now())
+        .timestamp() as u64;
+
+    info!(
+        "Pruning hourly data older than {} hours (before timestamp {})",
+        retention_hours, cutoff_timestamp
+    );
+
+    // Delete old hourly time aggregations
+    let time_filter = doc! {
+        "period": "hourly",
+        "timestamp": { "$lt": cutoff_timestamp as i64 }
+    };
+
+    let time_result = time_aggregations_collection
+        .delete_many(time_filter, None)
+        .await?;
+    info!(
+        "Deleted {} old hourly time aggregations",
+        time_result.deleted_count
+    );
+
+    // Delete old hourly summary aggregations
+    let summary_filter = doc! {
+        "period": "hourly",
+        "timestamp": { "$lt": cutoff_timestamp as i64 }
+    };
+
+    let summary_result = summary_aggregations_collection
+        .delete_many(summary_filter, None)
+        .await?;
+    info!(
+        "Deleted {} old hourly summary aggregations",
+        summary_result.deleted_count
+    );
+
+    let total_deleted = time_result.deleted_count + summary_result.deleted_count;
+    info!("Total deleted: {} old hourly records", total_deleted);
+
+    Ok(())
+}
+
 /// Get time aggregations with filtering
 pub async fn get_time_aggregations(
     db: &Database,

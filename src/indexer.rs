@@ -1,4 +1,6 @@
-use crate::database::{upsert_summary_aggregation, upsert_time_aggregation, DbResult};
+use crate::database::{
+    prune_old_hourly_data, upsert_summary_aggregation, upsert_time_aggregation, DbResult,
+};
 use crate::models::{
     Network, Opportunity, SummaryAggregation, TimeAggregation, TimeAggregationPeriod, Token,
     TokenAggregation,
@@ -17,14 +19,16 @@ pub struct Indexer {
     db: Arc<Database>,
     running: Arc<Mutex<bool>>,
     interval_minutes: u64,
+    hourly_data_retention_hours: u64,
 }
 
 impl Indexer {
-    pub fn new(db: Arc<Database>, interval_minutes: u64) -> Self {
+    pub fn new(db: Arc<Database>, interval_minutes: u64, hourly_data_retention_hours: u64) -> Self {
         Self {
             db,
             running: Arc::new(Mutex::new(false)),
             interval_minutes,
+            hourly_data_retention_hours,
         }
     }
 
@@ -45,6 +49,7 @@ impl Indexer {
         let db = Arc::clone(&self.db);
         let running = Arc::clone(&self.running);
         let interval_minutes = self.interval_minutes;
+        let hourly_data_retention_hours = self.hourly_data_retention_hours;
 
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(60 * interval_minutes));
@@ -63,7 +68,7 @@ impl Indexer {
                 interval.tick().await;
 
                 // Run indexing
-                if let Err(e) = Self::run_indexing_cycle(&db).await {
+                if let Err(e) = Self::run_indexing_cycle(&db, hourly_data_retention_hours).await {
                     error!("Indexing cycle failed: {}", e);
                 }
             }
@@ -76,7 +81,7 @@ impl Indexer {
         info!("Stopping indexer...");
     }
 
-    async fn run_indexing_cycle(db: &Database) -> DbResult<()> {
+    async fn run_indexing_cycle(db: &Database, hourly_data_retention_hours: u64) -> DbResult<()> {
         info!("Starting indexing cycle");
         let start_time = std::time::Instant::now();
 
@@ -120,6 +125,13 @@ impl Indexer {
             }
         } else {
             info!("No opportunities found for summary aggregation");
+        }
+
+        // Prune old hourly data
+        if let Err(e) = prune_old_hourly_data(db, hourly_data_retention_hours).await {
+            warn!("Failed to prune old hourly data: {}", e);
+        } else {
+            info!("Successfully pruned old hourly data");
         }
 
         let duration = start_time.elapsed();
@@ -437,7 +449,7 @@ impl Indexer {
 
     pub async fn run_manual_indexing(db: &Database) -> DbResult<()> {
         info!("Running manual indexing cycle");
-        Self::run_indexing_cycle(db).await
+        Self::run_indexing_cycle(db, 168).await
     }
 
     /// Create time aggregations for hourly, daily, and monthly periods

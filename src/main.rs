@@ -34,7 +34,11 @@ async fn main() -> std::io::Result<()> {
 
     // Start the background indexer
     let db_arc = std::sync::Arc::new(db.clone());
-    let indexer = Indexer::new(db_arc, config.indexer.interval_minutes);
+    let indexer = Indexer::new(
+        db_arc,
+        config.indexer.interval_minutes,
+        config.indexer.hourly_data_retention_hours,
+    );
     indexer.start().await;
     info!(
         "Background indexer started ({} minute interval)",

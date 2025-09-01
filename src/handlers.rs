@@ -169,7 +169,7 @@ pub async fn trigger_indexing_handler(db: web::Data<Database>) -> Result<HttpRes
 
     // Create a temporary indexer instance for manual run
     let db_arc = std::sync::Arc::new(db.get_ref().clone());
-    let _indexer = Indexer::new(db_arc.clone(), 5); // Default interval for manual runs
+    let _indexer = Indexer::new(db_arc.clone(), 5, 168); // Default interval for manual runs
 
     match Indexer::run_manual_indexing(&db_arc).await {
         Ok(_) => {
