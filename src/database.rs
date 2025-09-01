@@ -6,7 +6,11 @@ use regex;
 
 use crate::{
     config::DatabaseConfig,
-    models::{Network, Opportunity, Token, TokenPerformanceResponse},
+    models::{
+        Network, Opportunity, SummaryAggregation, SummaryAggregationResponse, TimeAggregation,
+        TimeAggregationPeriod, TimeAggregationResponse, Token, TokenAggregation,
+        TokenAggregationResponse, TokenPerformanceResponse,
+    },
 };
 
 pub type DbResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -984,6 +988,437 @@ pub async fn get_token_performance(
             address: token.address.clone(),
             network_id: token.network_id,
             network_name,
+        });
+    }
+
+    Ok(result)
+}
+
+/// Create or update time aggregation for a specific period
+pub async fn upsert_time_aggregation(
+    db: &Database,
+    network_id: u64,
+    period: TimeAggregationPeriod,
+    timestamp: u64,
+    aggregation: TimeAggregation,
+) -> DbResult<()> {
+    let collection: Collection<TimeAggregation> = db.collection("time_aggregations");
+
+    let filter = doc! {
+        "network_id": network_id as i64,
+        "period": period_to_string(period),
+        "timestamp": timestamp as i64,
+    };
+
+    // First, try to find existing aggregation to merge tokens
+    let existing_aggregation = collection.find_one(filter.clone(), None).await?;
+
+    let merged_tokens = if let Some(existing) = existing_aggregation {
+        // Merge tokens from existing and new aggregation
+        merge_token_aggregations(&existing.top_profit_tokens, &aggregation.top_profit_tokens)
+    } else {
+        // No existing aggregation, use new tokens as-is
+        aggregation.top_profit_tokens.clone()
+    };
+
+    let update = doc! {
+        "$set": {
+            "network_id": network_id as i64,
+            "period": period_to_string(period),
+            "timestamp": timestamp as i64,
+            "period_start": aggregation.period_start,
+            "period_end": aggregation.period_end,
+            "top_profit_tokens": bson::to_bson(&merged_tokens)?,
+            "updated_at": Utc::now().timestamp() as i64,
+        },
+        "$inc": {
+            "total_opportunities": aggregation.total_opportunities as i64,
+            "executed_opportunities": aggregation.executed_opportunities as i64,
+            "successful_opportunities": aggregation.successful_opportunities as i64,
+            "failed_opportunities": aggregation.failed_opportunities as i64,
+            "total_profit_usd": aggregation.total_profit_usd,
+            "total_gas_usd": aggregation.total_gas_usd,
+        },
+        "$setOnInsert": {
+            "created_at": Utc::now().timestamp() as i64,
+        }
+    };
+
+    collection
+        .update_one(
+            filter,
+            update,
+            mongodb::options::UpdateOptions::builder()
+                .upsert(true)
+                .build(),
+        )
+        .await?;
+
+    Ok(())
+}
+
+/// Get time aggregations with filtering
+pub async fn get_time_aggregations(
+    db: &Database,
+    network_id: Option<u64>,
+    period: Option<String>,
+    start_time: Option<String>,
+    end_time: Option<String>,
+    limit: Option<u64>,
+    offset: Option<u64>,
+) -> DbResult<Vec<TimeAggregationResponse>> {
+    let collection: Collection<TimeAggregation> = db.collection("time_aggregations");
+    let networks_collection: Collection<Network> = db.collection("networks");
+
+    // Build filter
+    let mut filter = doc! {};
+    if let Some(net_id) = network_id {
+        filter.insert("network_id", net_id as i64);
+    }
+    if let Some(period_str) = period {
+        filter.insert("period", period_str);
+    }
+
+    // Time range filter
+    if start_time.is_some() || end_time.is_some() {
+        let mut time_filter = doc! {};
+        if let Some(start) = start_time {
+            let start_ts = parse_time_to_timestamp(&start)?;
+            time_filter.insert("$gte", start_ts as i64);
+        }
+        if let Some(end) = end_time {
+            let end_ts = parse_time_to_timestamp(&end)?;
+            time_filter.insert("$lte", end_ts as i64);
+        }
+        filter.insert("timestamp", time_filter);
+    }
+
+    // Set up pagination
+    let limit = limit.unwrap_or(100).min(1000);
+    let offset = offset.unwrap_or(0);
+
+    // Create find options with pagination
+    let find_options = mongodb::options::FindOptions::builder()
+        .limit(limit as i64)
+        .skip(offset as u64)
+        .sort(doc! { "timestamp": -1 }) // Sort by timestamp descending (newest first)
+        .build();
+
+    // Find aggregations with pagination
+    let mut cursor = collection.find(filter.clone(), Some(find_options)).await?;
+
+    let mut aggregations = Vec::new();
+    while let Some(agg) = cursor.next().await {
+        aggregations.push(agg?);
+    }
+
+    // Get network information
+    let network_ids: Vec<i64> = aggregations
+        .iter()
+        .map(|a| a.network_id as i64)
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    let mut networks = std::collections::HashMap::new();
+    if !network_ids.is_empty() {
+        let mut network_cursor = networks_collection
+            .find(doc! { "chain_id": { "$in": network_ids } }, None)
+            .await?;
+
+        while let Some(network) = network_cursor.next().await {
+            let network = network?;
+            networks.insert(network.chain_id, network);
+        }
+    }
+
+    // Build response
+    let mut result = Vec::new();
+    for agg in aggregations {
+        let network = networks.get(&agg.network_id);
+        let network_name = network
+            .map(|n| n.name.clone())
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        let top_tokens: Vec<TokenAggregationResponse> = agg
+            .top_profit_tokens
+            .iter()
+            .map(|t| TokenAggregationResponse {
+                address: t.address.clone(),
+                name: t.name.clone(),
+                symbol: t.symbol.clone(),
+                total_profit_usd: t.total_profit_usd,
+                total_profit: t.total_profit.clone(),
+                opportunity_count: t.opportunity_count,
+                avg_profit_usd: t.avg_profit_usd,
+            })
+            .collect();
+
+        // Calculate derived fields
+        let avg_profit_usd = if agg.total_opportunities > 0 {
+            agg.total_profit_usd / agg.total_opportunities as f64
+        } else {
+            0.0
+        };
+        let avg_gas_usd = if agg.total_opportunities > 0 {
+            agg.total_gas_usd / agg.total_opportunities as f64
+        } else {
+            0.0
+        };
+        let success_rate = if agg.executed_opportunities > 0 {
+            agg.successful_opportunities as f64 / agg.executed_opportunities as f64
+        } else {
+            0.0
+        };
+
+        result.push(TimeAggregationResponse {
+            network_id: agg.network_id,
+            network_name,
+            period: agg.period,
+            timestamp: agg.timestamp,
+            period_start: agg.period_start,
+            period_end: agg.period_end,
+            total_opportunities: agg.total_opportunities,
+            executed_opportunities: agg.executed_opportunities,
+            successful_opportunities: agg.successful_opportunities,
+            failed_opportunities: agg.failed_opportunities,
+            total_profit_usd: agg.total_profit_usd,
+            total_gas_usd: agg.total_gas_usd,
+            avg_profit_usd,
+            avg_gas_usd,
+            success_rate,
+            top_profit_tokens: top_tokens,
+        });
+    }
+
+    Ok(result)
+}
+
+/// Merge two token aggregation lists by combining data for the same tokens
+fn merge_token_aggregations(
+    existing_tokens: &[TokenAggregation],
+    new_tokens: &[TokenAggregation],
+) -> Vec<TokenAggregation> {
+    use alloy::primitives::U256;
+    use std::collections::HashMap;
+
+    // Create a map of existing tokens by address
+    let mut token_map: HashMap<String, TokenAggregation> = existing_tokens
+        .iter()
+        .map(|t| (t.address.clone(), t.clone()))
+        .collect();
+
+    // Merge new tokens into the map
+    for new_token in new_tokens {
+        let entry = token_map
+            .entry(new_token.address.clone())
+            .or_insert_with(|| TokenAggregation {
+                address: new_token.address.clone(),
+                name: new_token.name.clone(),
+                symbol: new_token.symbol.clone(),
+                total_profit_usd: 0.0,
+                total_profit: "0".to_string(),
+                opportunity_count: 0,
+                avg_profit_usd: 0.0,
+            });
+
+        // Add USD profit
+        entry.total_profit_usd += new_token.total_profit_usd;
+        entry.opportunity_count += new_token.opportunity_count;
+
+        // Add raw profit using U256
+        if let (Ok(existing_u256), Ok(new_u256)) = (
+            entry.total_profit.parse::<U256>(),
+            new_token.total_profit.parse::<U256>(),
+        ) {
+            entry.total_profit = existing_u256.saturating_add(new_u256).to_string();
+        } else {
+            // If parsing fails, just use the new value
+            entry.total_profit = new_token.total_profit.clone();
+        }
+
+        // Update name/symbol if not set
+        if entry.name.is_none() && new_token.name.is_some() {
+            entry.name = new_token.name.clone();
+        }
+        if entry.symbol.is_none() && new_token.symbol.is_some() {
+            entry.symbol = new_token.symbol.clone();
+        }
+    }
+
+    // Convert back to vector and sort by total profit USD
+    let mut merged_tokens: Vec<TokenAggregation> = token_map.into_values().collect();
+    merged_tokens.sort_by(|a, b| {
+        b.total_profit_usd
+            .partial_cmp(&a.total_profit_usd)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    // Take top 10 tokens
+    merged_tokens.truncate(10);
+
+    // Calculate averages for the merged tokens
+    for token in &mut merged_tokens {
+        if token.opportunity_count > 0 {
+            token.avg_profit_usd = token.total_profit_usd / token.opportunity_count as f64;
+        }
+    }
+
+    merged_tokens
+}
+
+/// Helper function to convert TimeAggregationPeriod to string
+fn period_to_string(period: TimeAggregationPeriod) -> String {
+    match period {
+        TimeAggregationPeriod::Hourly => "hourly".to_string(),
+        TimeAggregationPeriod::Daily => "daily".to_string(),
+        TimeAggregationPeriod::Monthly => "monthly".to_string(),
+    }
+}
+
+/// Helper function to parse time string to timestamp
+fn parse_time_to_timestamp(time_str: &str) -> DbResult<u64> {
+    // Try parsing as Unix timestamp first
+    if let Ok(ts) = time_str.parse::<u64>() {
+        return Ok(ts);
+    }
+
+    // Try parsing as ISO 8601
+    if let Ok(dt) = DateTime::parse_from_rfc3339(time_str) {
+        return Ok(dt.timestamp() as u64);
+    }
+
+    // Try parsing as common date formats
+    let formats = [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+        "%Y/%m/%d %H:%M:%S",
+        "%Y/%m/%d %H:%M",
+        "%Y/%m/%d",
+    ];
+
+    for format in &formats {
+        if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(time_str, format) {
+            return Ok(dt.and_utc().timestamp() as u64);
+        }
+    }
+
+    Err("Invalid time format".into())
+}
+
+/// Create or update summary aggregation for a specific period (cross-network totals)
+pub async fn upsert_summary_aggregation(
+    db: &Database,
+    period: TimeAggregationPeriod,
+    timestamp: u64,
+    aggregation: SummaryAggregation,
+) -> DbResult<()> {
+    let collection: Collection<SummaryAggregation> = db.collection("summary_aggregations");
+
+    let filter = doc! {
+        "period": period_to_string(period),
+        "timestamp": timestamp as i64,
+    };
+
+    let update = doc! {
+        "$set": {
+            "period": period_to_string(period),
+            "timestamp": timestamp as i64,
+            "period_start": aggregation.period_start,
+            "period_end": aggregation.period_end,
+            "updated_at": Utc::now().timestamp() as i64,
+        },
+        "$inc": {
+            "total_opportunities": aggregation.total_opportunities as i64,
+            "executed_opportunities": aggregation.executed_opportunities as i64,
+            "successful_opportunities": aggregation.successful_opportunities as i64,
+            "failed_opportunities": aggregation.failed_opportunities as i64,
+            "total_profit_usd": aggregation.total_profit_usd,
+            "total_gas_usd": aggregation.total_gas_usd,
+        },
+        "$setOnInsert": {
+            "created_at": Utc::now().timestamp() as i64,
+        }
+    };
+
+    collection
+        .update_one(
+            filter,
+            update,
+            mongodb::options::UpdateOptions::builder()
+                .upsert(true)
+                .build(),
+        )
+        .await?;
+
+    Ok(())
+}
+
+/// Get summary aggregations with filtering
+pub async fn get_summary_aggregations(
+    db: &Database,
+    period: Option<String>,
+    start_time: Option<String>,
+    end_time: Option<String>,
+    limit: Option<u64>,
+    offset: Option<u64>,
+) -> DbResult<Vec<SummaryAggregationResponse>> {
+    let collection: Collection<SummaryAggregation> = db.collection("summary_aggregations");
+
+    // Build filter
+    let mut filter = doc! {};
+    if let Some(period_str) = period {
+        filter.insert("period", period_str);
+    }
+
+    // Time range filter
+    if start_time.is_some() || end_time.is_some() {
+        let mut time_filter = doc! {};
+        if let Some(start) = start_time {
+            let start_ts = parse_time_to_timestamp(&start)?;
+            time_filter.insert("$gte", start_ts as i64);
+        }
+        if let Some(end) = end_time {
+            let end_ts = parse_time_to_timestamp(&end)?;
+            time_filter.insert("$lte", end_ts as i64);
+        }
+        filter.insert("timestamp", time_filter);
+    }
+
+    // Set up pagination
+    let limit = limit.unwrap_or(100).min(1000);
+    let offset = offset.unwrap_or(0);
+
+    // Create find options with pagination
+    let find_options = mongodb::options::FindOptions::builder()
+        .limit(limit as i64)
+        .skip(offset as u64)
+        .sort(doc! { "timestamp": -1 }) // Sort by timestamp descending (newest first)
+        .build();
+
+    // Find aggregations with pagination
+    let mut cursor = collection.find(filter.clone(), Some(find_options)).await?;
+
+    let mut aggregations = Vec::new();
+    while let Some(agg) = cursor.next().await {
+        aggregations.push(agg?);
+    }
+
+    // Build response
+    let mut result = Vec::new();
+    for agg in aggregations {
+        result.push(SummaryAggregationResponse {
+            period: agg.period.clone(),
+            timestamp: agg.timestamp,
+            period_start: agg.period_start.clone(),
+            period_end: agg.period_end.clone(),
+            total_opportunities: agg.total_opportunities,
+            executed_opportunities: agg.executed_opportunities,
+            successful_opportunities: agg.successful_opportunities,
+            failed_opportunities: agg.failed_opportunities,
+            total_profit_usd: agg.total_profit_usd,
+            total_gas_usd: agg.total_gas_usd,
         });
     }
 

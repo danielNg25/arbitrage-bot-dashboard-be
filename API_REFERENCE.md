@@ -8,7 +8,10 @@ Media type: `application/json`
 
 -   GET `/api/v1/health`
 -   GET `/api/v1/networks`
+-   GET `/api/v1/networks/{network_id}/aggregations`
 -   GET `/api/v1/tokens/performance`
+-   GET `/api/v1/time-aggregations`
+-   GET `/api/v1/summary-aggregations`
 -   GET `/api/v1/opportunities`
 -   GET `/api/v1/opportunities/{id}`
 -   GET `/api/v1/opportunities/tx/{tx_hash}`
@@ -57,6 +60,97 @@ interface NetworkResponse {
     created_at: number;
     success_rate: number | null; // success / executed when executed > 0
 }
+```
+
+---
+
+### GET /api/v1/networks/{network_id}/aggregations
+
+-   Description: Returns time-based aggregations for a specific network
+-   Request body: none
+
+Path parameters:
+
+-   `network_id` (number) - The chain ID of the network to query
+
+Query parameters:
+
+-   `period` (string, optional) - Time period: "hourly", "daily", "monthly"
+-   `start_time` (string, optional) - Start time filter (ISO 8601 or Unix timestamp)
+-   `end_time` (string, optional) - End time filter (ISO 8601 or Unix timestamp)
+-   `limit` (number, optional) - Number of results to return (default 100, max 1000)
+-   `offset` (number, optional) - Number of results to skip (default 0)
+
+Response 200 (array of `TimeAggregationResponse`):
+
+```typescript
+interface TimeAggregationResponse {
+    network_id: number;
+    network_name: string;
+    period: string; // "hourly", "daily", "monthly"
+    timestamp: number; // Unix timestamp for the period start
+    period_start: string; // ISO 8601 formatted period start
+    period_end: string; // ISO 8601 formatted period end
+    total_opportunities: number;
+    executed_opportunities: number;
+    successful_opportunities: number;
+    failed_opportunities: number;
+    total_profit_usd: number;
+    total_gas_usd: number;
+    avg_profit_usd: number;
+    avg_gas_usd: number;
+    success_rate: number;
+    top_profit_tokens: {
+        address: string;
+        name: string | null;
+        symbol: string | null;
+        total_profit_usd: number;
+        total_profit: string; // U256 as string
+        opportunity_count: number;
+        avg_profit_usd: number;
+    }[];
+}
+```
+
+Example request:
+
+```bash
+curl "http://localhost:8081/api/v1/networks/1/aggregations?period=hourly&limit=24"
+```
+
+Example response:
+
+```json
+[
+    {
+        "network_id": 1,
+        "network_name": "Ethereum",
+        "period": "hourly",
+        "timestamp": 1704067200,
+        "period_start": "2024-01-01T00:00:00Z",
+        "period_end": "2024-01-01T01:00:00Z",
+        "total_opportunities": 150,
+        "executed_opportunities": 120,
+        "successful_opportunities": 95,
+        "failed_opportunities": 25,
+        "total_profit_usd": 1250.75,
+        "total_gas_usd": 45.2,
+        "avg_profit_usd": 8.34,
+        "avg_gas_usd": 0.3,
+        "success_rate": 0.79,
+        "top_profit_tokens": [
+            {
+                "address": "0xA0b86a33E6441b8c4C8C0E4b8c4C8C0E4b8c4C8C0",
+                "name": "USD Coin",
+                "symbol": "USDC",
+                "total_profit_usd": 450.25,
+                "total_profit": "450250000",
+                "opportunity_count": 25,
+                "avg_profit_usd": 18.01
+            }
+        ]
+    }
+]
 ```
 
 ---
@@ -116,6 +210,208 @@ Example response:
         "address": "0xa0b86a33e6c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0",
         "network_id": 1,
         "network_name": "Ethereum"
+    }
+]
+```
+
+---
+
+### GET /api/v1/time-aggregations
+
+-   Description: Returns time-based aggregations (hourly, daily, monthly) of arbitrage performance
+-   Request body: none
+
+Query parameters:
+
+-   `network_id` (u64, optional) - Filter by specific network/chain
+-   `period` (string, optional) - Time period: "hourly", "daily", "monthly"
+-   `start_time` (string, optional) - Start time filter (ISO 8601 or Unix timestamp)
+-   `end_time` (string, optional) - End time filter (ISO 8601 or Unix timestamp)
+-   `limit` (u64, optional) - Number of results to return (default 100, max 1000)
+-   `offset` (u64, optional) - Number of results to skip (default 0)
+
+Response 200 (array of `TimeAggregationResponse`):
+
+```typescript
+interface TimeAggregationResponse {
+    network_id: number;
+    network_name: string;
+    period: string; // "hourly", "daily", "monthly"
+    timestamp: number; // Unix timestamp for period start
+    period_start: string; // ISO 8601 formatted period start
+    period_end: string; // ISO 8601 formatted period end
+    total_opportunities: number;
+    executed_opportunities: number;
+    successful_opportunities: number;
+    failed_opportunities: number;
+    total_profit_usd: number;
+    total_gas_usd: number;
+    avg_profit_usd: number;
+    avg_gas_usd: number;
+    success_rate: number;
+    top_profit_tokens: TokenAggregationResponse[];
+}
+
+interface TokenAggregationResponse {
+    address: string;
+    name: string | null;
+    symbol: string | null;
+    total_profit_usd: number;
+    total_profit: string; // U256 string
+    opportunity_count: number;
+    avg_profit_usd: number;
+}
+```
+
+Example request:
+
+```bash
+curl -X GET "http://localhost:8081/api/v1/time-aggregations?period=daily&network_id=1&limit=7"
+```
+
+Example response:
+
+```json
+[
+    {
+        "network_id": 1,
+        "network_name": "Ethereum",
+        "period": "daily",
+        "timestamp": 1735689600,
+        "period_start": "2025-01-01T00:00:00Z",
+        "period_end": "2025-01-02T00:00:00Z",
+        "total_opportunities": 1250,
+        "executed_opportunities": 850,
+        "successful_opportunities": 720,
+        "failed_opportunities": 130,
+        "total_profit_usd": 12500.75,
+        "total_gas_usd": 850.25,
+        "avg_profit_usd": 10.0,
+        "avg_gas_usd": 0.68,
+        "success_rate": 0.847,
+        "top_profit_tokens": [
+            {
+                "address": "0x0000000000000000000000000000000000000000",
+                "name": "Ethereum",
+                "symbol": "ETH",
+                "total_profit_usd": 5000.25,
+                "total_profit": "2000000000000000000",
+                "opportunity_count": 250,
+                "avg_profit_usd": 20.0
+            }
+        ]
+    }
+]
+```
+
+---
+
+### GET /api/v1/summary-aggregations
+
+-   Description: Returns cross-network summary aggregations (hourly, daily, monthly) of arbitrage performance
+-   Request body: none
+
+Query parameters:
+
+-   `period` (string, optional) - Time period: "hourly", "daily", "monthly"
+-   `start_time` (string, optional) - Start time filter (ISO 8601 or Unix timestamp)
+-   `end_time` (string, optional) - End time filter (ISO 8601 or Unix timestamp)
+-   `limit` (u64, optional) - Number of results to return (default 100, max 1000)
+-   `offset` (u64, optional) - Number of results to skip (default 0)
+
+Response 200 (array of `SummaryAggregationResponse`):
+
+```typescript
+interface SummaryAggregationResponse {
+    period: string; // "hourly", "daily", "monthly"
+    timestamp: number; // Unix timestamp for the period start
+    period_start: string; // ISO 8601 formatted period start
+    period_end: string; // ISO 8601 formatted period end
+    total_opportunities: number; // Total across all networks
+    executed_opportunities: number; // Total executed across all networks
+    successful_opportunities: number; // Total successful across all networks
+    failed_opportunities: number; // Total failed across all networks
+    total_profit_usd: number; // Total profit across all networks
+    total_gas_usd: number; // Total gas costs across all networks
+    avg_profit_usd: number; // Average profit per opportunity
+    avg_gas_usd: number; // Average gas cost per opportunity
+    success_rate: number; // Overall success rate
+    network_breakdown: NetworkSummaryResponse[]; // Per-network breakdown
+    top_profit_tokens: TokenAggregationResponse[]; // Top tokens across all networks
+}
+
+interface NetworkSummaryResponse {
+    network_id: number; // Chain ID
+    network_name: string; // Network name
+    total_opportunities: number;
+    executed_opportunities: number;
+    successful_opportunities: number;
+    failed_opportunities: number;
+    total_profit_usd: number;
+    total_gas_usd: number;
+    success_rate: number;
+}
+```
+
+Example request:
+
+```bash
+curl -X GET "http://localhost:8081/api/v1/summary-aggregations?period=daily&limit=10"
+```
+
+Example response:
+
+```json
+[
+    {
+        "period": "daily",
+        "timestamp": 1704067200,
+        "period_start": "2024-01-01T00:00:00Z",
+        "period_end": "2024-01-02T00:00:00Z",
+        "total_opportunities": 1250,
+        "executed_opportunities": 1050,
+        "successful_opportunities": 890,
+        "failed_opportunities": 160,
+        "total_profit_usd": 12500.75,
+        "total_gas_usd": 850.25,
+        "avg_profit_usd": 10.0,
+        "avg_gas_usd": 0.68,
+        "success_rate": 0.847,
+        "network_breakdown": [
+            {
+                "network_id": 1,
+                "network_name": "Ethereum",
+                "total_opportunities": 800,
+                "executed_opportunities": 700,
+                "successful_opportunities": 600,
+                "failed_opportunities": 100,
+                "total_profit_usd": 8000.5,
+                "total_gas_usd": 500.15,
+                "success_rate": 0.857
+            },
+            {
+                "network_id": 137,
+                "network_name": "Polygon",
+                "total_opportunities": 450,
+                "executed_opportunities": 350,
+                "successful_opportunities": 290,
+                "failed_opportunities": 60,
+                "total_profit_usd": 4500.25,
+                "total_gas_usd": 350.1,
+                "success_rate": 0.829
+            }
+        ],
+        "top_profit_tokens": [
+            {
+                "address": "0x0000000000000000000000000000000000000000",
+                "name": "Ethereum",
+                "symbol": "ETH",
+                "total_profit_usd": 5000.25,
+                "total_profit": "2000000000000000000",
+                "opportunity_count": 250,
+                "avg_profit_usd": 20.0
+            }
+        ]
     }
 ]
 ```

@@ -383,3 +383,180 @@ pub struct TokenPerformanceResponse {
     pub network_id: u64,
     pub network_name: String,
 }
+
+/// Time Aggregation Period
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeAggregationPeriod {
+    Hourly,
+    Daily,
+    Monthly,
+}
+
+/// Time Aggregation Data for MongoDB
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TimeAggregation {
+    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
+    pub id: Option<bson::oid::ObjectId>,
+    pub network_id: u64,
+    pub period: String,       // "hourly", "daily", "monthly"
+    pub timestamp: u64,       // Unix timestamp for the period start
+    pub period_start: String, // ISO 8601 formatted period start
+    pub period_end: String,   // ISO 8601 formatted period end
+
+    // Aggregated metrics
+    pub total_opportunities: u64,
+    pub executed_opportunities: u64,
+    pub successful_opportunities: u64,
+    pub failed_opportunities: u64,
+    pub total_profit_usd: f64,
+    pub total_gas_usd: f64,
+
+    // Token-specific aggregations
+    pub top_profit_tokens: Vec<TokenAggregation>,
+
+    // Time series data
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+/// Token Aggregation within Time Period
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TokenAggregation {
+    pub address: String,
+    pub name: Option<String>,
+    pub symbol: Option<String>,
+    pub total_profit_usd: f64,
+    pub total_profit: String, // U256 string
+    pub opportunity_count: u64,
+    pub avg_profit_usd: f64,
+}
+
+/// Time Aggregation Query Parameters
+#[derive(Debug, Deserialize)]
+pub struct TimeAggregationQuery {
+    pub network_id: Option<u64>,
+    pub period: Option<String>,     // "hourly", "daily", "monthly"
+    pub start_time: Option<String>, // ISO 8601 or Unix timestamp
+    pub end_time: Option<String>,   // ISO 8601 or Unix timestamp
+    pub limit: Option<u64>,
+    pub offset: Option<u64>,
+}
+
+/// Time Aggregation Response
+#[derive(Debug, Serialize)]
+pub struct TimeAggregationResponse {
+    pub network_id: u64,
+    pub network_name: String,
+    pub period: String,
+    pub timestamp: u64,
+    pub period_start: String,
+    pub period_end: String,
+    pub total_opportunities: u64,
+    pub executed_opportunities: u64,
+    pub successful_opportunities: u64,
+    pub failed_opportunities: u64,
+    pub total_profit_usd: f64,
+    pub total_gas_usd: f64,
+    pub avg_profit_usd: f64,
+    pub avg_gas_usd: f64,
+    pub success_rate: f64,
+    pub top_profit_tokens: Vec<TokenAggregationResponse>,
+}
+
+/// Token Aggregation Response
+#[derive(Debug, Serialize)]
+pub struct TokenAggregationResponse {
+    pub address: String,
+    pub name: Option<String>,
+    pub symbol: Option<String>,
+    pub total_profit_usd: f64,
+    pub total_profit: String,
+    pub opportunity_count: u64,
+    pub avg_profit_usd: f64,
+}
+
+/// Summary Aggregation Data for MongoDB (cross-network totals)
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SummaryAggregation {
+    #[serde(rename = "_id", skip_serializing_if = "Option::is_none")]
+    pub id: Option<bson::oid::ObjectId>,
+    pub period: String,       // "hourly", "daily", "monthly"
+    pub timestamp: u64,       // Unix timestamp for the period start
+    pub period_start: String, // ISO 8601 formatted period start
+    pub period_end: String,   // ISO 8601 formatted period end
+
+    // Cross-network aggregated metrics
+    pub total_opportunities: u64,
+    pub executed_opportunities: u64,
+    pub successful_opportunities: u64,
+    pub failed_opportunities: u64,
+    pub total_profit_usd: f64,
+    pub total_gas_usd: f64,
+    // Time series data
+    pub created_at: u64,
+    pub updated_at: u64,
+}
+
+/// Network Summary within Summary Aggregation
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct NetworkSummary {
+    pub network_id: u64,
+    pub network_name: String,
+    pub total_opportunities: u64,
+    pub executed_opportunities: u64,
+    pub successful_opportunities: u64,
+    pub failed_opportunities: u64,
+    pub total_profit_usd: f64,
+    pub total_gas_usd: f64,
+    pub success_rate: f64,
+}
+
+/// Summary Aggregation Query Parameters
+#[derive(Debug, Deserialize)]
+pub struct SummaryAggregationQuery {
+    pub period: Option<String>,     // "hourly", "daily", "monthly"
+    pub start_time: Option<String>, // ISO 8601 or Unix timestamp
+    pub end_time: Option<String>,   // ISO 8601 or Unix timestamp
+    pub limit: Option<u64>,
+    pub offset: Option<u64>,
+}
+
+/// Network Aggregation Query Parameters (for specific network aggregations)
+#[derive(Debug, Deserialize)]
+pub struct NetworkAggregationQuery {
+    pub network_id: Option<u64>, // Optional - will be set from path parameter
+    pub period: Option<String>,  // "hourly", "daily", "monthly"
+    pub start_time: Option<String>, // ISO 8601 or Unix timestamp
+    pub end_time: Option<String>, // ISO 8601 or Unix timestamp
+    pub limit: Option<u64>,
+    pub offset: Option<u64>,
+}
+
+/// Summary Aggregation Response
+#[derive(Debug, Serialize)]
+pub struct SummaryAggregationResponse {
+    pub period: String,
+    pub timestamp: u64,
+    pub period_start: String,
+    pub period_end: String,
+    pub total_opportunities: u64,
+    pub executed_opportunities: u64,
+    pub successful_opportunities: u64,
+    pub failed_opportunities: u64,
+    pub total_profit_usd: f64,
+    pub total_gas_usd: f64,
+}
+
+//// Network Summary Response
+// #[derive(Debug, Serialize)]
+// pub struct NetworkSummaryResponse {
+//     pub network_id: u64,
+//     pub network_name: String,
+//     pub total_opportunities: u64,
+//     pub executed_opportunities: u64,
+//     pub successful_opportunities: u64,
+//     pub failed_opportunities: u64,
+//     pub total_profit_usd: f64,
+//     pub total_gas_usd: f64,
+//     pub success_rate: f64,
+// }

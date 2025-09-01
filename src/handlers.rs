@@ -4,11 +4,15 @@ use mongodb::Database;
 
 use crate::{
     database::{
-        get_networks_with_stats, get_opportunities, get_profit_over_time, get_token_performance,
+        get_networks_with_stats, get_opportunities, get_profit_over_time, get_summary_aggregations,
+        get_time_aggregations, get_token_performance,
     },
     errors::ApiError,
     indexer::Indexer,
-    models::{OpportunityQuery, TokenPerformanceQuery},
+    models::{
+        NetworkAggregationQuery, OpportunityQuery, SummaryAggregationQuery, TimeAggregationQuery,
+        TokenPerformanceQuery,
+    },
 };
 
 /// GET /networks - Returns all networks with statistics
@@ -200,6 +204,109 @@ pub async fn get_token_performance_handler(
         }
         Err(e) => {
             error!("Failed to retrieve token performance data: {}", e);
+            Err(ApiError::DatabaseError(e.to_string()))
+        }
+    }
+}
+
+/// GET /time-aggregations - Returns time-based aggregations
+pub async fn get_time_aggregations_handler(
+    db: web::Data<Database>,
+    query: web::Query<TimeAggregationQuery>,
+) -> Result<HttpResponse, ApiError> {
+    info!("Handling GET /time-aggregations request");
+
+    match get_time_aggregations(
+        &db,
+        query.network_id,
+        query.period.clone(),
+        query.start_time.clone(),
+        query.end_time.clone(),
+        query.limit,
+        query.offset,
+    )
+    .await
+    {
+        Ok(aggregations) => {
+            info!(
+                "Successfully retrieved {} time aggregation records",
+                aggregations.len()
+            );
+            Ok(HttpResponse::Ok().json(aggregations))
+        }
+        Err(e) => {
+            error!("Failed to retrieve time aggregations: {}", e);
+            Err(ApiError::DatabaseError(e.to_string()))
+        }
+    }
+}
+
+/// GET /summary-aggregations - Returns cross-network summary aggregations
+pub async fn get_summary_aggregations_handler(
+    db: web::Data<Database>,
+    query: web::Query<SummaryAggregationQuery>,
+) -> Result<HttpResponse, ApiError> {
+    info!("Handling GET /summary-aggregations request");
+
+    match get_summary_aggregations(
+        &db,
+        query.period.clone(),
+        query.start_time.clone(),
+        query.end_time.clone(),
+        query.limit,
+        query.offset,
+    )
+    .await
+    {
+        Ok(aggregations) => {
+            info!(
+                "Successfully retrieved {} summary aggregation records",
+                aggregations.len()
+            );
+            Ok(HttpResponse::Ok().json(aggregations))
+        }
+        Err(e) => {
+            error!("Failed to retrieve summary aggregations: {}", e);
+            Err(ApiError::DatabaseError(e.to_string()))
+        }
+    }
+}
+
+/// GET /networks/{network_id}/aggregations - Returns time aggregations for a specific network
+pub async fn get_network_aggregations_handler(
+    path: web::Path<u64>,
+    db: web::Data<Database>,
+    query: web::Query<NetworkAggregationQuery>,
+) -> Result<HttpResponse, ApiError> {
+    let network_id = path.into_inner();
+    info!("Handling GET /networks/{}/aggregations request", network_id);
+
+    let query_params = query.into_inner();
+
+    match get_time_aggregations(
+        &db,
+        Some(network_id),
+        query_params.period.clone(),
+        query_params.start_time.clone(),
+        query_params.end_time.clone(),
+        query_params.limit,
+        query_params.offset,
+    )
+    .await
+    {
+        Ok(aggregations) => {
+            info!(
+                "Successfully retrieved {} time aggregation records for network {}",
+                aggregations.len(),
+                network_id
+            );
+            Ok(HttpResponse::Ok().json(aggregations))
+        }
+        Err(e) => {
+            error!(
+                "Failed to retrieve time aggregations for network {}: {}",
+                network_id, e
+            );
             Err(ApiError::DatabaseError(e.to_string()))
         }
     }
