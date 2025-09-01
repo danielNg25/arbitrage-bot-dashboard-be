@@ -3,10 +3,12 @@ use log::{error, info};
 use mongodb::Database;
 
 use crate::{
-    database::{get_networks_with_stats, get_opportunities, get_profit_over_time},
+    database::{
+        get_networks_with_stats, get_opportunities, get_profit_over_time, get_token_performance,
+    },
     errors::ApiError,
     indexer::Indexer,
-    models::OpportunityQuery,
+    models::{OpportunityQuery, TokenPerformanceQuery},
 };
 
 /// GET /networks - Returns all networks with statistics
@@ -41,6 +43,8 @@ pub async fn get_opportunities_handler(
         query.status.clone(),
         query.min_profit_usd,
         query.max_profit_usd,
+        query.min_estimate_profit_usd,
+        query.max_estimate_profit_usd,
         query.min_gas_usd,
         query.max_gas_usd,
         query.min_created_at.clone(),
@@ -174,6 +178,28 @@ pub async fn trigger_indexing_handler(db: web::Data<Database>) -> Result<HttpRes
         }
         Err(e) => {
             error!("Manual indexing failed: {}", e);
+            Err(ApiError::DatabaseError(e.to_string()))
+        }
+    }
+}
+
+/// GET /tokens/performance - Returns token performance data
+pub async fn get_token_performance_handler(
+    db: web::Data<Database>,
+    query: web::Query<TokenPerformanceQuery>,
+) -> Result<HttpResponse, ApiError> {
+    info!("Handling GET /tokens/performance request");
+
+    match get_token_performance(&db, query.network_id, query.limit, query.offset).await {
+        Ok(tokens) => {
+            info!(
+                "Successfully retrieved {} token performance records",
+                tokens.len()
+            );
+            Ok(HttpResponse::Ok().json(tokens))
+        }
+        Err(e) => {
+            error!("Failed to retrieve token performance data: {}", e);
             Err(ApiError::DatabaseError(e.to_string()))
         }
     }

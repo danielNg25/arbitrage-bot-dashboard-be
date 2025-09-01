@@ -8,6 +8,7 @@ Media type: `application/json`
 
 -   GET `/api/v1/health`
 -   GET `/api/v1/networks`
+-   GET `/api/v1/tokens/performance`
 -   GET `/api/v1/opportunities`
 -   GET `/api/v1/opportunities/{id}`
 -   GET `/api/v1/opportunities/tx/{tx_hash}`
@@ -60,6 +61,67 @@ interface NetworkResponse {
 
 ---
 
+### GET /api/v1/tokens/performance
+
+-   Description: Returns token performance data with aggregated profit metrics
+-   Request body: none
+
+Query parameters:
+
+-   `network_id` (u64, optional) - Filter by specific network/chain
+-   `limit` (u64, optional) - Number of results to return (default 50, max 1000)
+-   `offset` (u64, optional) - Number of results to skip (default 0)
+
+Response 200 (array of `TokenPerformanceResponse`):
+
+```typescript
+interface TokenPerformanceResponse {
+    name: string | null; // Full token name
+    symbol: string | null; // Token symbol (ETH, USDC, etc.)
+    total_profit_usd: number; // Total profit from arbitrage
+    total_profit: string; // Total profit in token units (U256 string)
+    price: number | null; // Current USD price
+    address: string; // Contract address
+    network_id: number; // Chain ID (1, 137, 56, etc.)
+    network_name: string; // Network name
+}
+```
+
+Example request:
+
+```bash
+curl -X GET "http://localhost:8081/api/v1/tokens/performance?network_id=1&limit=10"
+```
+
+Example response:
+
+```json
+[
+    {
+        "name": "Ethereum",
+        "symbol": "ETH",
+        "total_profit_usd": 1250.75,
+        "total_profit": "500000000000000000",
+        "price": 2500.15,
+        "address": "0x0000000000000000000000000000000000000000",
+        "network_id": 1,
+        "network_name": "Ethereum"
+    },
+    {
+        "name": "USD Coin",
+        "symbol": "USDC",
+        "total_profit_usd": 850.25,
+        "total_profit": "850250000",
+        "price": 1.0,
+        "address": "0xa0b86a33e6c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0",
+        "network_id": 1,
+        "network_name": "Ethereum"
+    }
+]
+```
+
+---
+
 ### GET /api/v1/opportunities
 
 -   Description: Paginated opportunities with filtering and token enrichment
@@ -70,6 +132,8 @@ Query parameters:
 -   `status` (string, optional, case-insensitive)
 -   `min_profit_usd` (f64, optional)
 -   `max_profit_usd` (f64, optional)
+-   `min_estimate_profit_usd` (f64, optional)
+-   `max_estimate_profit_usd` (f64, optional)
 -   `min_gas_usd` (f64, optional)
 -   `max_gas_usd` (f64, optional)
 -   `min_created_at` (string, optional; ISO 8601 or Unix seconds)

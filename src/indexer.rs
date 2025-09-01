@@ -1,5 +1,6 @@
 use crate::database::DbResult;
 use crate::models::{Network, Opportunity, Token};
+use alloy::primitives::U256;
 use chrono::Utc;
 use futures::StreamExt;
 use log::{error, info, warn};
@@ -161,7 +162,7 @@ impl Indexer {
         let mut failed_count = network.failed.unwrap_or(0);
 
         // Track token metrics
-        let mut token_metrics: HashMap<String, f64> = HashMap::new(); // (profit_usd)
+        let mut token_metrics: HashMap<String, (f64, U256)> = HashMap::new(); // (profit_usd, total_profit_u256)
 
         for opportunity in &opportunities {
             // Update network metrics
@@ -186,11 +187,27 @@ impl Indexer {
             }
 
             // Update token metrics
-            if let Some(profit_usd) = opportunity.profit_usd {
+            if opportunity.profit_usd.is_some() || opportunity.profit.is_some() {
                 let entry = token_metrics
                     .entry(opportunity.profit_token.clone())
-                    .or_insert(0.0);
-                *entry += profit_usd;
+                    .or_insert((0.0, U256::ZERO));
+
+                // Aggregate USD profit
+                if let Some(profit_usd) = opportunity.profit_usd {
+                    entry.0 += profit_usd;
+                }
+
+                // Aggregate raw profit using U256 arithmetic
+                if let Some(ref profit_str) = opportunity.profit {
+                    match profit_str.parse::<U256>() {
+                        Ok(profit_u256) => {
+                            entry.1 = entry.1.saturating_add(profit_u256);
+                        }
+                        Err(e) => {
+                            warn!("Failed to parse profit '{}' as U256: {}", profit_str, e);
+                        }
+                    }
+                }
             }
         }
 
@@ -213,8 +230,33 @@ impl Indexer {
             .await?;
 
         // Update token metrics
-        for (token_address, profit_usd) in token_metrics {
-            let token_update = doc! {
+        for (token_address, (profit_usd, total_profit_u256)) in token_metrics {
+            // First, get the existing token to read current total_profit
+            let existing_token = tokens_collection
+                .find_one(
+                    doc! {
+                        "network_id": network_id as i64,
+                        "address": token_address.to_lowercase()
+                    },
+                    None,
+                )
+                .await?;
+
+            // Calculate new total_profit by adding to existing value
+            let new_total_profit = if let Some(token) = existing_token {
+                if let Some(existing_profit_str) = &token.total_profit {
+                    match existing_profit_str.parse::<U256>() {
+                        Ok(existing_u256) => existing_u256.saturating_add(total_profit_u256),
+                        Err(_) => total_profit_u256, // If parsing fails, use new value only
+                    }
+                } else {
+                    total_profit_u256
+                }
+            } else {
+                total_profit_u256
+            };
+
+            let mut token_update = doc! {
                 "$inc": {
                     "total_profit_usd": profit_usd
                 },
@@ -222,6 +264,14 @@ impl Indexer {
                     "updated_at": Utc::now().timestamp() as i64
                 }
             };
+
+            // Update total_profit with the aggregated U256 value (converted to string)
+            if new_total_profit > U256::ZERO {
+                token_update
+                    .get_document_mut("$set")
+                    .unwrap()
+                    .insert("total_profit", new_total_profit.to_string());
+            }
 
             tokens_collection
                 .update_one(

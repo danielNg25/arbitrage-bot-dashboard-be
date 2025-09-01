@@ -6,7 +6,7 @@ use regex;
 
 use crate::{
     config::DatabaseConfig,
-    models::{Network, Opportunity},
+    models::{Network, Opportunity, Token, TokenPerformanceResponse},
 };
 
 pub type DbResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -85,6 +85,8 @@ pub async fn get_opportunities(
     status: Option<String>,
     min_profit_usd: Option<f64>,
     max_profit_usd: Option<f64>,
+    min_estimate_profit_usd: Option<f64>,
+    max_estimate_profit_usd: Option<f64>,
     min_gas_usd: Option<f64>,
     max_gas_usd: Option<f64>,
     min_created_at: Option<String>,
@@ -127,6 +129,18 @@ pub async fn get_opportunities(
             profit_filter.insert("$lte", max);
         }
         filter.insert("profit_usd", profit_filter);
+    }
+
+    // Estimated profit USD range filter
+    if min_estimate_profit_usd.is_some() || max_estimate_profit_usd.is_some() {
+        let mut est_profit_filter = doc! {};
+        if let Some(min) = min_estimate_profit_usd {
+            est_profit_filter.insert("$gte", min);
+        }
+        if let Some(max) = max_estimate_profit_usd {
+            est_profit_filter.insert("$lte", max);
+        }
+        filter.insert("estimate_profit_usd", est_profit_filter);
     }
 
     // Gas USD range filter
@@ -889,4 +903,89 @@ pub async fn get_opportunity_details_by_tx_hash(
         path_tokens,
         path_pools,
     }))
+}
+
+/// Get token performance data with network information
+pub async fn get_token_performance(
+    db: &Database,
+    network_id: Option<u64>,
+    limit: Option<u64>,
+    offset: Option<u64>,
+) -> DbResult<Vec<TokenPerformanceResponse>> {
+    let tokens_collection: Collection<Token> = db.collection("tokens");
+    let networks_collection: Collection<Network> = db.collection("networks");
+
+    // Build filter for network_id if provided
+    let mut filter = doc! {};
+    if let Some(net_id) = network_id {
+        filter.insert("network_id", net_id as i64);
+    }
+
+    // Only include tokens that have profit data
+    filter.insert("total_profit_usd", doc! { "$gt": 0.0 });
+
+    // Set up pagination
+    let limit = limit.unwrap_or(50).min(1000); // Max 1000 results
+    let offset = offset.unwrap_or(0);
+
+    // Find tokens with profit data
+    let mut cursor = tokens_collection.find(filter.clone(), None).await?;
+
+    let mut tokens = Vec::new();
+    while let Some(token) = cursor.next().await {
+        tokens.push(token?);
+    }
+
+    // Get network information for all unique network_ids
+    let network_ids: Vec<i64> = tokens
+        .iter()
+        .map(|t| t.network_id as i64)
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+
+    let mut networks = std::collections::HashMap::new();
+    if !network_ids.is_empty() {
+        let mut network_cursor = networks_collection
+            .find(doc! { "chain_id": { "$in": network_ids } }, None)
+            .await?;
+
+        while let Some(network) = network_cursor.next().await {
+            let network = network?;
+            networks.insert(network.chain_id, network);
+        }
+    }
+
+    // Apply pagination and build response
+    let start = offset as usize;
+    let end = (offset + limit) as usize;
+    let paginated_tokens = if start < tokens.len() {
+        &tokens[start..end.min(tokens.len())]
+    } else {
+        &[]
+    };
+
+    let mut result = Vec::new();
+    for token in paginated_tokens {
+        let network = networks.get(&token.network_id);
+        let network_name = network
+            .map(|n| n.name.clone())
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        result.push(TokenPerformanceResponse {
+            name: token.name.clone(),
+            symbol: token.symbol.clone(),
+            total_profit_usd: token.total_profit_usd,
+            total_profit: token
+                .total_profit
+                .clone()
+                .unwrap_or_else(|| "0".to_string()),
+            price: token.price,
+            address: token.address.clone(),
+            network_id: token.network_id,
+            network_name,
+        });
+    }
+
+    Ok(result)
 }

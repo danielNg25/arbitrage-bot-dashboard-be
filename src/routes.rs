@@ -2,8 +2,8 @@ use actix_web::web;
 
 use crate::handlers::{
     get_networks, get_opportunities_handler, get_opportunity_details_by_tx_handler,
-    get_opportunity_details_handler, get_profit_over_time_handler, health_check,
-    trigger_indexing_handler,
+    get_opportunity_details_handler, get_profit_over_time_handler, get_token_performance_handler,
+    health_check, trigger_indexing_handler,
 };
 
 pub fn configure_routes(cfg: &mut web::ServiceConfig) {
@@ -11,6 +11,10 @@ pub fn configure_routes(cfg: &mut web::ServiceConfig) {
         web::scope("/api/v1")
             .route("/health", web::get().to(health_check))
             .route("/networks", web::get().to(get_networks))
+            .route(
+                "/tokens/performance",
+                web::get().to(get_token_performance_handler),
+            )
             .route("/opportunities", web::get().to(get_opportunities_handler))
             .route(
                 "/opportunities/profit-over-time",

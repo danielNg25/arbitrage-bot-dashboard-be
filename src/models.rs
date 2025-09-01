@@ -276,6 +276,8 @@ pub struct OpportunityQuery {
     pub status: Option<String>,
     pub min_profit_usd: Option<f64>,
     pub max_profit_usd: Option<f64>,
+    pub min_estimate_profit_usd: Option<f64>,
+    pub max_estimate_profit_usd: Option<f64>,
     pub min_gas_usd: Option<f64>,
     pub max_gas_usd: Option<f64>,
     pub min_created_at: Option<String>, // ISO 8601 timestamp (e.g., "2024-01-01T00:00:00Z") or Unix timestamp (e.g., "1704067200")
@@ -359,4 +361,25 @@ pub struct PoolResponse {
     pub address: String,
     pub pool_type: String,
     pub tokens: Vec<String>,
+}
+
+/// Token Performance Query Parameters
+#[derive(Debug, Deserialize)]
+pub struct TokenPerformanceQuery {
+    pub network_id: Option<u64>,
+    pub limit: Option<u64>,
+    pub offset: Option<u64>,
+}
+
+/// Token Performance Response
+#[derive(Debug, Serialize)]
+pub struct TokenPerformanceResponse {
+    pub name: Option<String>,
+    pub symbol: Option<String>,
+    pub total_profit_usd: f64,
+    pub total_profit: String,
+    pub price: Option<f64>,
+    pub address: String,
+    pub network_id: u64,
+    pub network_name: String,
 }
