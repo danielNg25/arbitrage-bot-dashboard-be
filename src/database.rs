@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
-use log::info;
+use log::{debug, info};
 use mongodb::{bson::doc, Client, Collection, Database};
 use regex;
 
@@ -27,7 +27,7 @@ pub async fn init_database(db_config: &DatabaseConfig) -> DbResult<Database> {
     let client = Client::with_options(client_options)?;
     let db = client.database(&db_config.database_name);
 
-    info!("Connected to MongoDB database: {}", db_config.database_name);
+    debug!("Connected to MongoDB database: {}", db_config.database_name);
 
     Ok(db)
 }
@@ -112,10 +112,10 @@ pub async fn get_opportunities(
                 "$options": "i"
             },
         );
-        info!("Applied single status filter (case-insensitive): {}", s);
+        debug!("Applied single status filter (case-insensitive): {}", s);
     }
 
-    info!("Final filter: {:?}", filter);
+    debug!("Final filter: {:?}", filter);
 
     // Profit USD range filter
     if min_profit_usd.is_some() || max_profit_usd.is_some() {
@@ -152,7 +152,7 @@ pub async fn get_opportunities(
                 // Already a Unix timestamp
                 created_at_filter.insert("$gte", unix_ts as i64);
                 has_filter = true;
-                info!(
+                debug!(
                     "Applied min_created_at (Unix): {} -> filter: $gte: {}",
                     min_ts, unix_ts
                 );
@@ -161,12 +161,12 @@ pub async fn get_opportunities(
                 let unix_ts = dt.timestamp() as u64;
                 created_at_filter.insert("$gte", unix_ts as i64);
                 has_filter = true;
-                info!(
+                debug!(
                     "Applied min_created_at (ISO): {} -> filter: $gte: {}",
                     min_ts, unix_ts
                 );
             } else {
-                info!("Invalid min_created_at format: {}", min_ts);
+                debug!("Invalid min_created_at format: {}", min_ts);
             }
         }
 
@@ -176,7 +176,7 @@ pub async fn get_opportunities(
                 // Already a Unix timestamp
                 created_at_filter.insert("$lte", unix_ts as i64);
                 has_filter = true;
-                info!(
+                debug!(
                     "Applied max_created_at (Unix): {} -> filter: $lte: {}",
                     max_ts, unix_ts
                 );
@@ -185,19 +185,19 @@ pub async fn get_opportunities(
                 let unix_ts = dt.timestamp() as u64;
                 created_at_filter.insert("$lte", unix_ts as i64);
                 has_filter = true;
-                info!(
+                debug!(
                     "Applied max_created_at (ISO): {} -> filter: $lte: {}",
                     max_ts, unix_ts
                 );
             } else {
-                info!("Invalid max_created_at format: {}", max_ts);
+                debug!("Invalid max_created_at format: {}", max_ts);
             }
         }
 
         if has_filter {
-            info!("Final created_at filter: {:?}", created_at_filter);
+            debug!("Final created_at filter: {:?}", created_at_filter);
             filter.insert("created_at", created_at_filter);
-            info!("Final complete filter: {:?}", filter);
+            debug!("Final complete filter: {:?}", filter);
         }
     }
 
@@ -485,7 +485,7 @@ pub async fn get_opportunity_details(
 
     if let Some(ref path) = opportunity.path {
         // Process the path: even indices are tokens, odd indices are pools
-        info!("Processing path with {} elements", path.len());
+        debug!("Processing path with {} elements", path.len());
 
         // Create lookup maps for fast access
         let token_map: std::collections::HashMap<String, &crate::models::Token> = all_tokens
@@ -499,7 +499,7 @@ pub async fn get_opportunity_details(
             .collect();
 
         for (index, address) in path.iter().enumerate() {
-            info!(
+            debug!(
                 "Path element {}: {} (type: {})",
                 index,
                 address,
@@ -510,7 +510,7 @@ pub async fn get_opportunity_details(
                 // Token - lookup from batch fetched data
                 let address_lower = address.to_lowercase();
                 if let Some(token) = token_map.get(&address_lower) {
-                    info!(
+                    debug!(
                         "Found token: {} - name: {:?}, symbol: {:?}",
                         token.address, token.name, token.symbol
                     );
@@ -523,7 +523,7 @@ pub async fn get_opportunity_details(
                         price: token.price,
                     });
                 } else {
-                    info!("Token not found for address: {}", address_lower);
+                    debug!("Token not found for address: {}", address_lower);
                     // Token not found, create a basic response
                     path_tokens.push(crate::models::TokenResponse {
                         id: "".to_string(), // No ID for tokens not found in database
@@ -538,7 +538,7 @@ pub async fn get_opportunity_details(
                 // Pool - lookup from batch fetched data
                 let address_lower = address.to_lowercase();
                 if let Some(pool) = pool_map.get(&address_lower) {
-                    info!(
+                    debug!(
                         "Found pool: {} - type: {}, tokens: {:?}",
                         pool.address, pool.pool_type, pool.tokens
                     );
@@ -549,7 +549,7 @@ pub async fn get_opportunity_details(
                         tokens: pool.tokens.clone(),
                     });
                 } else {
-                    info!("Pool not found for address: {}", address_lower);
+                    debug!("Pool not found for address: {}", address_lower);
                     // Pool not found, create a basic response
                     path_pools.push(crate::models::PoolResponse {
                         id: "".to_string(), // No ID for pools not found in database
@@ -702,9 +702,9 @@ pub async fn get_opportunity_details_by_tx_hash(
     if let Some(debug) = debug_info {
         if let Some(path) = &debug.path {
             // Process the path: even indices are tokens, odd indices are pools
-            info!("Processing path with {} elements", path.len());
+            debug!("Processing path with {} elements", path.len());
             for (index, address) in path.iter().enumerate() {
-                info!(
+                debug!(
                     "Path element {}: {} (type: {})",
                     index,
                     address,
@@ -713,7 +713,7 @@ pub async fn get_opportunity_details_by_tx_hash(
                 if index % 2 == 0 {
                     // Token - fetch token details
                     let address_lower = address.to_lowercase();
-                    info!(
+                    debug!(
                         "Querying token with network_id: {}, address: {} (lowercase: {})",
                         opportunity.network_id, address, address_lower
                     );
@@ -727,7 +727,7 @@ pub async fn get_opportunity_details_by_tx_hash(
                         )
                         .await?
                     {
-                        info!(
+                        debug!(
                             "Found token: {} - name: {:?}, symbol: {:?}",
                             token.address, token.name, token.symbol
                         );
@@ -740,7 +740,7 @@ pub async fn get_opportunity_details_by_tx_hash(
                             price: token.price,
                         });
                     } else {
-                        info!("Token not found for address: {}", address_lower);
+                        debug!("Token not found for address: {}", address_lower);
                         // Token not found, create a basic response
                         path_tokens.push(crate::models::TokenResponse {
                             id: "".to_string(), // No ID for tokens not found in database
@@ -754,7 +754,7 @@ pub async fn get_opportunity_details_by_tx_hash(
                 } else {
                     // Pool - fetch pool details
                     let address_lower = address.to_lowercase();
-                    info!(
+                    debug!(
                         "Querying pool with network_id: {}, address: {} (lowercase: {})",
                         opportunity.network_id, address, address_lower
                     );
@@ -768,7 +768,7 @@ pub async fn get_opportunity_details_by_tx_hash(
                         )
                         .await?
                     {
-                        info!(
+                        debug!(
                             "Found pool: {} - type: {}, tokens: {:?}",
                             pool.address, pool.pool_type, pool.tokens
                         );
@@ -779,7 +779,7 @@ pub async fn get_opportunity_details_by_tx_hash(
                             tokens: pool.tokens,
                         });
                     } else {
-                        info!("Pool not found for address: {}", address_lower);
+                        debug!("Pool not found for address: {}", address_lower);
                         // Pool not found, create a basic response
                         path_pools.push(crate::models::PoolResponse {
                             id: "".to_string(), // No ID for pools not found in database
