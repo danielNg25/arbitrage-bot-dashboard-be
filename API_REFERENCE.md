@@ -97,9 +97,9 @@ interface TimeAggregationResponse {
     failed_opportunities: number;
     total_profit_usd: number;
     total_gas_usd: number;
-    avg_profit_usd: number;
-    avg_gas_usd: number;
-    success_rate: number;
+    avg_profit_usd: number; // Calculated on-the-fly: total_profit_usd / total_opportunities
+    avg_gas_usd: number; // Calculated on-the-fly: total_gas_usd / total_opportunities
+    success_rate: number; // Calculated on-the-fly: successful_opportunities / executed_opportunities
     top_profit_tokens: {
         address: string;
         name: string | null;
@@ -246,9 +246,9 @@ interface TimeAggregationResponse {
     failed_opportunities: number;
     total_profit_usd: number;
     total_gas_usd: number;
-    avg_profit_usd: number;
-    avg_gas_usd: number;
-    success_rate: number;
+    avg_profit_usd: number; // Calculated on-the-fly: total_profit_usd / total_opportunities
+    avg_gas_usd: number; // Calculated on-the-fly: total_gas_usd / total_opportunities
+    success_rate: number; // Calculated on-the-fly: successful_opportunities / executed_opportunities
     top_profit_tokens: TokenAggregationResponse[];
 }
 
@@ -333,23 +333,6 @@ interface SummaryAggregationResponse {
     failed_opportunities: number; // Total failed across all networks
     total_profit_usd: number; // Total profit across all networks
     total_gas_usd: number; // Total gas costs across all networks
-    avg_profit_usd: number; // Average profit per opportunity
-    avg_gas_usd: number; // Average gas cost per opportunity
-    success_rate: number; // Overall success rate
-    network_breakdown: NetworkSummaryResponse[]; // Per-network breakdown
-    top_profit_tokens: TokenAggregationResponse[]; // Top tokens across all networks
-}
-
-interface NetworkSummaryResponse {
-    network_id: number; // Chain ID
-    network_name: string; // Network name
-    total_opportunities: number;
-    executed_opportunities: number;
-    successful_opportunities: number;
-    failed_opportunities: number;
-    total_profit_usd: number;
-    total_gas_usd: number;
-    success_rate: number;
 }
 ```
 
@@ -373,45 +356,7 @@ Example response:
         "successful_opportunities": 890,
         "failed_opportunities": 160,
         "total_profit_usd": 12500.75,
-        "total_gas_usd": 850.25,
-        "avg_profit_usd": 10.0,
-        "avg_gas_usd": 0.68,
-        "success_rate": 0.847,
-        "network_breakdown": [
-            {
-                "network_id": 1,
-                "network_name": "Ethereum",
-                "total_opportunities": 800,
-                "executed_opportunities": 700,
-                "successful_opportunities": 600,
-                "failed_opportunities": 100,
-                "total_profit_usd": 8000.5,
-                "total_gas_usd": 500.15,
-                "success_rate": 0.857
-            },
-            {
-                "network_id": 137,
-                "network_name": "Polygon",
-                "total_opportunities": 450,
-                "executed_opportunities": 350,
-                "successful_opportunities": 290,
-                "failed_opportunities": 60,
-                "total_profit_usd": 4500.25,
-                "total_gas_usd": 350.1,
-                "success_rate": 0.829
-            }
-        ],
-        "top_profit_tokens": [
-            {
-                "address": "0x0000000000000000000000000000000000000000",
-                "name": "Ethereum",
-                "symbol": "ETH",
-                "total_profit_usd": 5000.25,
-                "total_profit": "2000000000000000000",
-                "opportunity_count": 250,
-                "avg_profit_usd": 20.0
-            }
-        ]
+        "total_gas_usd": 850.25
     }
 ]
 ```
@@ -636,3 +581,5 @@ Notes:
 
 -   Single-status filtering is case-insensitive in `/opportunities` list endpoint
 -   Timestamps provided by the API are ISO 8601 formatted strings where indicated; filters accept ISO 8601 or Unix seconds
+-   Derived fields (`avg_profit_usd`, `avg_gas_usd`, `success_rate`) are calculated on-the-fly during API response generation
+-   Summary aggregations contain only the core metrics; derived fields are not stored in the database to ensure data consistency

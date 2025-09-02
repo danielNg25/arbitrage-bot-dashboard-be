@@ -270,7 +270,7 @@ pub struct ProfitOverTimeResponse {
 }
 
 // Query parameters for filtering
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct OpportunityQuery {
     pub network_id: Option<u64>,
     pub status: Option<String>,

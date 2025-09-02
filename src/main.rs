@@ -66,9 +66,27 @@ async fn main() -> std::io::Result<()> {
             .filter_map(|m| m.parse().ok())
             .collect();
 
+        // Add WebSocket-specific headers and methods
+        let mut all_headers = config.cors.allowed_headers.clone();
+        all_headers.extend_from_slice(&[
+            "Upgrade".to_string(),
+            "Connection".to_string(),
+            "Sec-WebSocket-Key".to_string(),
+            "Sec-WebSocket-Version".to_string(),
+            "Sec-WebSocket-Protocol".to_string(),
+        ]);
+
+        let mut all_methods = methods;
+        all_methods.push(actix_web::http::Method::from_bytes(b"OPTIONS").unwrap());
+
         cors = cors
-            .allowed_methods(methods)
-            .allowed_headers(config.cors.allowed_headers.clone());
+            .allowed_methods(all_methods)
+            .allowed_headers(all_headers)
+            .expose_headers(vec![
+                "Upgrade".to_string(),
+                "Connection".to_string(),
+                "Sec-WebSocket-Accept".to_string(),
+            ]);
 
         if config.cors.supports_credentials {
             cors = cors.supports_credentials();
