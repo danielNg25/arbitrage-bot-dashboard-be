@@ -980,7 +980,9 @@ pub async fn get_token_performance(
         .build();
 
     // Find tokens with profit data
-    let mut cursor = tokens_collection.find(filter.clone(), Some(find_options)).await?;
+    let mut cursor = tokens_collection
+        .find(filter.clone(), Some(find_options))
+        .await?;
 
     let mut tokens = Vec::new();
     while let Some(token) = cursor.next().await {
@@ -1167,7 +1169,7 @@ pub async fn get_time_aggregations(
     offset: Option<u64>,
 ) -> DbResult<Vec<TimeAggregationResponse>> {
     let collection: Collection<TimeAggregation> = db.collection("time_aggregations");
-    
+
     // Build filter
     let mut filter = doc! {};
     if let Some(net_id) = network_id {
@@ -1194,21 +1196,17 @@ pub async fn get_time_aggregations(
     // Set up pagination
     let limit = limit.unwrap_or(100).min(1000);
     let offset = offset.unwrap_or(0);
-    
+
     // Build aggregation pipeline
     let pipeline = vec![
         // Match stage with our filter
         doc! { "$match": filter },
-        
         // Sort by timestamp descending
         doc! { "$sort": { "timestamp": -1 } },
-        
         // Skip for pagination
         doc! { "$skip": offset as i64 },
-        
         // Limit for pagination
         doc! { "$limit": limit as i64 },
-        
         // Lookup networks to get network names
         doc! {
             "$lookup": {
@@ -1225,7 +1223,6 @@ pub async fn get_time_aggregations(
                 "as": "network_info"
             }
         },
-        
         // Add calculated fields and network name
         doc! {
             "$addFields": {
@@ -1236,55 +1233,59 @@ pub async fn get_time_aggregations(
                     ]
                 }
             }
-        }
+        },
     ];
-    
+
     // Execute the aggregation pipeline
     let mut cursor = collection.aggregate(pipeline, None).await?;
-    
+
     // Collect results directly from the aggregation
     let mut result = Vec::new();
     while let Some(doc) = cursor.next().await {
         let doc = doc?;
-        
+
         // Extract basic fields
         let network_id = doc.get_i64("network_id").unwrap_or_default() as u64;
         let network_name = doc.get_str("network_name").unwrap_or("Unknown").to_string();
         let period = doc.get_str("period").unwrap_or_default().to_string();
         let timestamp = doc.get_i64("timestamp").unwrap_or_default() as u64;
-        let period_start = doc.get_i64("period_start").unwrap_or_default() as u64;
-        let period_end = doc.get_i64("period_end").unwrap_or_default() as u64;
+        let period_start = doc.get_str("period_start").unwrap_or_default().to_string();
+        let period_end = doc.get_str("period_end").unwrap_or_default().to_string();
         let total_opportunities = doc.get_i64("total_opportunities").unwrap_or_default() as u64;
-        let executed_opportunities = doc.get_i64("executed_opportunities").unwrap_or_default() as u64;
-        let successful_opportunities = doc.get_i64("successful_opportunities").unwrap_or_default() as u64;
+        let executed_opportunities =
+            doc.get_i64("executed_opportunities").unwrap_or_default() as u64;
+        let successful_opportunities =
+            doc.get_i64("successful_opportunities").unwrap_or_default() as u64;
         let failed_opportunities = doc.get_i64("failed_opportunities").unwrap_or_default() as u64;
         let total_profit_usd = doc.get_f64("total_profit_usd").unwrap_or_default();
         let total_gas_usd = doc.get_f64("total_gas_usd").unwrap_or_default();
-        
+
         // Calculate derived fields
         let avg_profit_usd = if total_opportunities > 0 {
             total_profit_usd / total_opportunities as f64
         } else {
             0.0
         };
-        
+
         let avg_gas_usd = if total_opportunities > 0 {
             total_gas_usd / total_opportunities as f64
         } else {
             0.0
         };
-        
+
         let success_rate = if executed_opportunities > 0 {
             successful_opportunities as f64 / executed_opportunities as f64
         } else {
             0.0
         };
-        
+
         // Parse token aggregations
         let mut top_profit_tokens = Vec::new();
         if let Ok(tokens) = doc.get_array("top_profit_tokens") {
             for token_bson in tokens {
-                if let Ok(token_doc) = bson::from_bson::<mongodb::bson::Document>(token_bson.clone()) {
+                if let Ok(token_doc) =
+                    bson::from_bson::<mongodb::bson::Document>(token_bson.clone())
+                {
                     top_profit_tokens.push(TokenAggregationResponse {
                         address: token_doc.get_str("address").unwrap_or_default().to_string(),
                         name: token_doc.get_str("name").ok().map(|s| s.to_string()),
@@ -1293,8 +1294,8 @@ pub async fn get_time_aggregations(
                         total_profit: token_doc.get_str("profit").unwrap_or_default().to_string(),
                         opportunity_count: token_doc.get_i64("count").unwrap_or_default() as u64,
                         avg_profit_usd: if token_doc.get_i64("count").unwrap_or_default() > 0 {
-                            token_doc.get_f64("profit_usd").unwrap_or_default() / 
-                            token_doc.get_i64("count").unwrap_or_default() as f64
+                            token_doc.get_f64("profit_usd").unwrap_or_default()
+                                / token_doc.get_i64("count").unwrap_or_default() as f64
                         } else {
                             0.0
                         },
@@ -1302,22 +1303,15 @@ pub async fn get_time_aggregations(
                 }
             }
         }
-        
-        // Format timestamps to ISO strings
-        let period_start_iso = DateTime::<Utc>::from_timestamp(period_start as i64, 0)
-            .map(|dt| dt.to_rfc3339())
-            .unwrap_or_else(|| Utc::now().to_rfc3339());
-        let period_end_iso = DateTime::<Utc>::from_timestamp(period_end as i64, 0)
-            .map(|dt| dt.to_rfc3339())
-            .unwrap_or_else(|| Utc::now().to_rfc3339());
-        
+
+        // Use the period_start and period_end directly since they're already ISO strings
         result.push(TimeAggregationResponse {
             network_id,
             network_name,
             period,
             timestamp,
-            period_start: period_start_iso,
-            period_end: period_end_iso,
+            period_start,
+            period_end,
             total_opportunities,
             executed_opportunities,
             successful_opportunities,
@@ -1665,8 +1659,9 @@ pub async fn create_database_indexes(db: &Database) -> DbResult<()> {
 
     // ===== TIME AGGREGATIONS COLLECTION INDEXES =====
     info!("Creating indexes for time_aggregations collection...");
-    let time_aggregations_collection: Collection<TimeAggregation> = db.collection("time_aggregations");
-    
+    let time_aggregations_collection: Collection<TimeAggregation> =
+        db.collection("time_aggregations");
+
     // Compound index for time aggregation queries: network_id + period + timestamp
     let time_agg_network_period_time_index = mongodb::IndexModel::builder()
         .keys(doc! {
@@ -1676,25 +1671,28 @@ pub async fn create_database_indexes(db: &Database) -> DbResult<()> {
         })
         .options(Some(index_options.clone()))
         .build();
-    
+
     // Index for timestamp-based queries
     let time_agg_timestamp_index = mongodb::IndexModel::builder()
         .keys(doc! { "timestamp": -1 })
         .options(Some(index_options.clone()))
         .build();
-    
+
     // Index for period-based queries
     let time_agg_period_index = mongodb::IndexModel::builder()
         .keys(doc! { "period": 1 })
         .options(Some(index_options.clone()))
         .build();
-    
+
     let time_agg_indexes = vec![
-        ("network_period_timestamp", time_agg_network_period_time_index),
+        (
+            "network_period_timestamp",
+            time_agg_network_period_time_index,
+        ),
         ("timestamp", time_agg_timestamp_index),
         ("period", time_agg_period_index),
     ];
-    
+
     for (name, index_model) in time_agg_indexes {
         match time_aggregations_collection
             .create_index(index_model, None)
@@ -1713,8 +1711,9 @@ pub async fn create_database_indexes(db: &Database) -> DbResult<()> {
 
     // ===== SUMMARY AGGREGATIONS COLLECTION INDEXES =====
     info!("Creating indexes for summary_aggregations collection...");
-    let summary_aggregations_collection: Collection<SummaryAggregation> = db.collection("summary_aggregations");
-    
+    let summary_aggregations_collection: Collection<SummaryAggregation> =
+        db.collection("summary_aggregations");
+
     // Compound index for summary aggregation queries: period + timestamp
     let summary_agg_period_time_index = mongodb::IndexModel::builder()
         .keys(doc! {
@@ -1723,18 +1722,18 @@ pub async fn create_database_indexes(db: &Database) -> DbResult<()> {
         })
         .options(Some(index_options.clone()))
         .build();
-    
+
     // Index for timestamp-based queries
     let summary_agg_timestamp_index = mongodb::IndexModel::builder()
         .keys(doc! { "timestamp": -1 })
         .options(Some(index_options.clone()))
         .build();
-    
+
     let summary_agg_indexes = vec![
         ("period_timestamp", summary_agg_period_time_index),
         ("timestamp", summary_agg_timestamp_index),
     ];
-    
+
     for (name, index_model) in summary_agg_indexes {
         match summary_aggregations_collection
             .create_index(index_model, None)
@@ -1763,13 +1762,13 @@ pub async fn create_database_indexes(db: &Database) -> DbResult<()> {
         })
         .options(Some(index_options.clone()))
         .build();
-    
+
     // Index for token symbol searches
     let token_symbol_index = mongodb::IndexModel::builder()
         .keys(doc! { "symbol": 1 })
         .options(Some(index_options.clone()))
         .build();
-    
+
     // Index for token name searches
     let token_name_index = mongodb::IndexModel::builder()
         .keys(doc! { "name": 1 })
@@ -1781,12 +1780,9 @@ pub async fn create_database_indexes(db: &Database) -> DbResult<()> {
         ("symbol", token_symbol_index),
         ("name", token_name_index),
     ];
-    
+
     for (name, index_model) in token_indexes {
-        match tokens_collection
-            .create_index(index_model, None)
-            .await
-        {
+        match tokens_collection.create_index(index_model, None).await {
             Ok(_) => info!("Created token index: {}", name),
             Err(e) => {
                 if e.to_string().contains("already exists") {
