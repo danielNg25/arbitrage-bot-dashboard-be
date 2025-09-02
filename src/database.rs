@@ -972,8 +972,15 @@ pub async fn get_token_performance(
     let limit = limit.unwrap_or(50).min(1000); // Max 1000 results
     let offset = offset.unwrap_or(0);
 
+    // Create find options with pagination and sorting
+    let find_options = mongodb::options::FindOptions::builder()
+        .sort(doc! { "total_profit_usd": -1 }) // Sort by profit descending
+        .skip(offset as u64)
+        .limit(limit as i64)
+        .build();
+
     // Find tokens with profit data
-    let mut cursor = tokens_collection.find(filter.clone(), None).await?;
+    let mut cursor = tokens_collection.find(filter.clone(), Some(find_options)).await?;
 
     let mut tokens = Vec::new();
     while let Some(token) = cursor.next().await {
@@ -1160,8 +1167,7 @@ pub async fn get_time_aggregations(
     offset: Option<u64>,
 ) -> DbResult<Vec<TimeAggregationResponse>> {
     let collection: Collection<TimeAggregation> = db.collection("time_aggregations");
-    let networks_collection: Collection<Network> = db.collection("networks");
-
+    
     // Build filter
     let mut filter = doc! {};
     if let Some(net_id) = network_id {
@@ -1188,98 +1194,140 @@ pub async fn get_time_aggregations(
     // Set up pagination
     let limit = limit.unwrap_or(100).min(1000);
     let offset = offset.unwrap_or(0);
-
-    // Create find options with pagination
-    let find_options = mongodb::options::FindOptions::builder()
-        .limit(limit as i64)
-        .skip(offset as u64)
-        .sort(doc! { "timestamp": -1 }) // Sort by timestamp descending (newest first)
-        .build();
-
-    // Find aggregations with pagination
-    let mut cursor = collection.find(filter.clone(), Some(find_options)).await?;
-
-    let mut aggregations = Vec::new();
-    while let Some(agg) = cursor.next().await {
-        aggregations.push(agg?);
-    }
-
-    // Get network information
-    let network_ids: Vec<i64> = aggregations
-        .iter()
-        .map(|a| a.network_id as i64)
-        .collect::<std::collections::HashSet<_>>()
-        .into_iter()
-        .collect();
-
-    let mut networks = std::collections::HashMap::new();
-    if !network_ids.is_empty() {
-        let mut network_cursor = networks_collection
-            .find(doc! { "chain_id": { "$in": network_ids } }, None)
-            .await?;
-
-        while let Some(network) = network_cursor.next().await {
-            let network = network?;
-            networks.insert(network.chain_id, network);
+    
+    // Build aggregation pipeline
+    let pipeline = vec![
+        // Match stage with our filter
+        doc! { "$match": filter },
+        
+        // Sort by timestamp descending
+        doc! { "$sort": { "timestamp": -1 } },
+        
+        // Skip for pagination
+        doc! { "$skip": offset as i64 },
+        
+        // Limit for pagination
+        doc! { "$limit": limit as i64 },
+        
+        // Lookup networks to get network names
+        doc! {
+            "$lookup": {
+                "from": "networks",
+                "let": { "network_id": "$network_id" },
+                "pipeline": [
+                    doc! {
+                        "$match": {
+                            "$expr": { "$eq": ["$chain_id", "$$network_id"] }
+                        }
+                    },
+                    doc! { "$project": { "_id": 0, "name": 1, "chain_id": 1 } }
+                ],
+                "as": "network_info"
+            }
+        },
+        
+        // Add calculated fields and network name
+        doc! {
+            "$addFields": {
+                "network_name": {
+                    "$ifNull": [
+                        { "$arrayElemAt": ["$network_info.name", 0] },
+                        "Unknown"
+                    ]
+                }
+            }
         }
-    }
-
-    // Build response
+    ];
+    
+    // Execute the aggregation pipeline
+    let mut cursor = collection.aggregate(pipeline, None).await?;
+    
+    // Collect results directly from the aggregation
     let mut result = Vec::new();
-    for agg in aggregations {
-        let network = networks.get(&agg.network_id);
-        let network_name = network
-            .map(|n| n.name.clone())
-            .unwrap_or_else(|| "Unknown".to_string());
-
-        let top_tokens: Vec<TokenAggregationResponse> = agg
-            .top_profit_tokens
-            .iter()
-            .map(|t| TokenAggregationResponse {
-                address: t.address.clone(),
-                name: t.name.clone(),
-                symbol: t.symbol.clone(),
-                total_profit_usd: t.total_profit_usd,
-                total_profit: t.total_profit.clone(),
-                opportunity_count: t.opportunity_count,
-                avg_profit_usd: t.avg_profit_usd,
-            })
-            .collect();
-
+    while let Some(doc) = cursor.next().await {
+        let doc = doc?;
+        
+        // Extract basic fields
+        let network_id = doc.get_i64("network_id").unwrap_or_default() as u64;
+        let network_name = doc.get_str("network_name").unwrap_or("Unknown").to_string();
+        let period = doc.get_str("period").unwrap_or_default().to_string();
+        let timestamp = doc.get_i64("timestamp").unwrap_or_default() as u64;
+        let period_start = doc.get_i64("period_start").unwrap_or_default() as u64;
+        let period_end = doc.get_i64("period_end").unwrap_or_default() as u64;
+        let total_opportunities = doc.get_i64("total_opportunities").unwrap_or_default() as u64;
+        let executed_opportunities = doc.get_i64("executed_opportunities").unwrap_or_default() as u64;
+        let successful_opportunities = doc.get_i64("successful_opportunities").unwrap_or_default() as u64;
+        let failed_opportunities = doc.get_i64("failed_opportunities").unwrap_or_default() as u64;
+        let total_profit_usd = doc.get_f64("total_profit_usd").unwrap_or_default();
+        let total_gas_usd = doc.get_f64("total_gas_usd").unwrap_or_default();
+        
         // Calculate derived fields
-        let avg_profit_usd = if agg.total_opportunities > 0 {
-            agg.total_profit_usd / agg.total_opportunities as f64
+        let avg_profit_usd = if total_opportunities > 0 {
+            total_profit_usd / total_opportunities as f64
         } else {
             0.0
         };
-        let avg_gas_usd = if agg.total_opportunities > 0 {
-            agg.total_gas_usd / agg.total_opportunities as f64
+        
+        let avg_gas_usd = if total_opportunities > 0 {
+            total_gas_usd / total_opportunities as f64
         } else {
             0.0
         };
-        let success_rate = if agg.executed_opportunities > 0 {
-            agg.successful_opportunities as f64 / agg.executed_opportunities as f64
+        
+        let success_rate = if executed_opportunities > 0 {
+            successful_opportunities as f64 / executed_opportunities as f64
         } else {
             0.0
         };
-
+        
+        // Parse token aggregations
+        let mut top_profit_tokens = Vec::new();
+        if let Ok(tokens) = doc.get_array("top_profit_tokens") {
+            for token_bson in tokens {
+                if let Ok(token_doc) = bson::from_bson::<mongodb::bson::Document>(token_bson.clone()) {
+                    top_profit_tokens.push(TokenAggregationResponse {
+                        address: token_doc.get_str("address").unwrap_or_default().to_string(),
+                        name: token_doc.get_str("name").ok().map(|s| s.to_string()),
+                        symbol: token_doc.get_str("symbol").ok().map(|s| s.to_string()),
+                        total_profit_usd: token_doc.get_f64("profit_usd").unwrap_or_default(),
+                        total_profit: token_doc.get_str("profit").unwrap_or_default().to_string(),
+                        opportunity_count: token_doc.get_i64("count").unwrap_or_default() as u64,
+                        avg_profit_usd: if token_doc.get_i64("count").unwrap_or_default() > 0 {
+                            token_doc.get_f64("profit_usd").unwrap_or_default() / 
+                            token_doc.get_i64("count").unwrap_or_default() as f64
+                        } else {
+                            0.0
+                        },
+                    });
+                }
+            }
+        }
+        
+        // Format timestamps to ISO strings
+        let period_start_iso = DateTime::<Utc>::from_timestamp(period_start as i64, 0)
+            .map(|dt| dt.to_rfc3339())
+            .unwrap_or_else(|| Utc::now().to_rfc3339());
+        let period_end_iso = DateTime::<Utc>::from_timestamp(period_end as i64, 0)
+            .map(|dt| dt.to_rfc3339())
+            .unwrap_or_else(|| Utc::now().to_rfc3339());
+        
         result.push(TimeAggregationResponse {
-            network_id: agg.network_id,
+            network_id,
             network_name,
-            period: agg.period,
-            timestamp: agg.timestamp,
-            period_start: agg.period_start,
-            period_end: agg.period_end,
-            total_opportunities: agg.total_opportunities,
-            executed_opportunities: agg.executed_opportunities,
-            successful_opportunities: agg.successful_opportunities,
-            failed_opportunities: agg.failed_opportunities,
-            total_profit_usd: agg.total_profit_usd,
-            total_gas_usd: agg.total_gas_usd,
+            period,
+            timestamp,
+            period_start: period_start_iso,
+            period_end: period_end_iso,
+            total_opportunities,
+            executed_opportunities,
+            successful_opportunities,
+            failed_opportunities,
+            total_profit_usd,
+            total_gas_usd,
             avg_profit_usd,
             avg_gas_usd,
             success_rate,
-            top_profit_tokens: top_tokens,
+            top_profit_tokens,
         });
     }
 
@@ -1521,12 +1569,13 @@ pub async fn get_summary_aggregations(
 pub async fn create_database_indexes(db: &Database) -> DbResult<()> {
     info!("Creating database indexes for performance optimization...");
 
-    // Opportunities collection indexes
-    let opportunities_collection: Collection<Opportunity> = db.collection("opportunities");
-
     // Create indexes with options
     let mut index_options = IndexOptions::default();
     index_options.background = Some(true);
+
+    // ===== OPPORTUNITIES COLLECTION INDEXES =====
+    info!("Creating indexes for opportunities collection...");
+    let opportunities_collection: Collection<Opportunity> = db.collection("opportunities");
 
     // Create index models using the builder pattern
     let network_status_time_index = mongodb::IndexModel::builder()
@@ -1585,7 +1634,7 @@ pub async fn create_database_indexes(db: &Database) -> DbResult<()> {
         .build();
 
     // Create all indexes
-    let indexes = vec![
+    let opportunity_indexes = vec![
         ("network_status_time", network_status_time_index),
         ("network_profit_time", network_profit_time_index),
         (
@@ -1598,25 +1647,115 @@ pub async fn create_database_indexes(db: &Database) -> DbResult<()> {
         ("profit_token", profit_token_index),
     ];
 
-    for (name, index_model) in indexes {
+    for (name, index_model) in opportunity_indexes {
         match opportunities_collection
             .create_index(index_model, None)
             .await
         {
-            Ok(_) => info!("Created index: {}", name),
+            Ok(_) => info!("Created opportunity index: {}", name),
             Err(e) => {
                 if e.to_string().contains("already exists") {
-                    debug!("Index {} already exists", name);
+                    debug!("Opportunity index {} already exists", name);
                 } else {
-                    warn!("Failed to create index {}: {}", name, e);
+                    warn!("Failed to create opportunity index {}: {}", name, e);
                 }
             }
         }
     }
 
-    // Tokens collection indexes
+    // ===== TIME AGGREGATIONS COLLECTION INDEXES =====
+    info!("Creating indexes for time_aggregations collection...");
+    let time_aggregations_collection: Collection<TimeAggregation> = db.collection("time_aggregations");
+    
+    // Compound index for time aggregation queries: network_id + period + timestamp
+    let time_agg_network_period_time_index = mongodb::IndexModel::builder()
+        .keys(doc! {
+            "network_id": 1,
+            "period": 1,
+            "timestamp": -1
+        })
+        .options(Some(index_options.clone()))
+        .build();
+    
+    // Index for timestamp-based queries
+    let time_agg_timestamp_index = mongodb::IndexModel::builder()
+        .keys(doc! { "timestamp": -1 })
+        .options(Some(index_options.clone()))
+        .build();
+    
+    // Index for period-based queries
+    let time_agg_period_index = mongodb::IndexModel::builder()
+        .keys(doc! { "period": 1 })
+        .options(Some(index_options.clone()))
+        .build();
+    
+    let time_agg_indexes = vec![
+        ("network_period_timestamp", time_agg_network_period_time_index),
+        ("timestamp", time_agg_timestamp_index),
+        ("period", time_agg_period_index),
+    ];
+    
+    for (name, index_model) in time_agg_indexes {
+        match time_aggregations_collection
+            .create_index(index_model, None)
+            .await
+        {
+            Ok(_) => info!("Created time aggregation index: {}", name),
+            Err(e) => {
+                if e.to_string().contains("already exists") {
+                    debug!("Time aggregation index {} already exists", name);
+                } else {
+                    warn!("Failed to create time aggregation index {}: {}", name, e);
+                }
+            }
+        }
+    }
+
+    // ===== SUMMARY AGGREGATIONS COLLECTION INDEXES =====
+    info!("Creating indexes for summary_aggregations collection...");
+    let summary_aggregations_collection: Collection<SummaryAggregation> = db.collection("summary_aggregations");
+    
+    // Compound index for summary aggregation queries: period + timestamp
+    let summary_agg_period_time_index = mongodb::IndexModel::builder()
+        .keys(doc! {
+            "period": 1,
+            "timestamp": -1
+        })
+        .options(Some(index_options.clone()))
+        .build();
+    
+    // Index for timestamp-based queries
+    let summary_agg_timestamp_index = mongodb::IndexModel::builder()
+        .keys(doc! { "timestamp": -1 })
+        .options(Some(index_options.clone()))
+        .build();
+    
+    let summary_agg_indexes = vec![
+        ("period_timestamp", summary_agg_period_time_index),
+        ("timestamp", summary_agg_timestamp_index),
+    ];
+    
+    for (name, index_model) in summary_agg_indexes {
+        match summary_aggregations_collection
+            .create_index(index_model, None)
+            .await
+        {
+            Ok(_) => info!("Created summary aggregation index: {}", name),
+            Err(e) => {
+                if e.to_string().contains("already exists") {
+                    debug!("Summary aggregation index {} already exists", name);
+                } else {
+                    warn!("Failed to create summary aggregation index {}: {}", name, e);
+                }
+            }
+        }
+    }
+
+    // ===== TOKENS COLLECTION INDEXES =====
+    info!("Creating indexes for tokens collection...");
     let tokens_collection: Collection<crate::models::Token> = db.collection("tokens");
 
+    // Compound index for token lookup by network and address
     let token_network_address_index = mongodb::IndexModel::builder()
         .keys(doc! {
             "network_id": 1,
@@ -1624,17 +1763,37 @@ pub async fn create_database_indexes(db: &Database) -> DbResult<()> {
         })
         .options(Some(index_options.clone()))
         .build();
+    
+    // Index for token symbol searches
+    let token_symbol_index = mongodb::IndexModel::builder()
+        .keys(doc! { "symbol": 1 })
+        .options(Some(index_options.clone()))
+        .build();
+    
+    // Index for token name searches
+    let token_name_index = mongodb::IndexModel::builder()
+        .keys(doc! { "name": 1 })
+        .options(Some(index_options.clone()))
+        .build();
 
-    match tokens_collection
-        .create_index(token_network_address_index, None)
-        .await
-    {
-        Ok(_) => info!("Created token index: network_address"),
-        Err(e) => {
-            if e.to_string().contains("already exists") {
-                debug!("Token index already exists");
-            } else {
-                warn!("Failed to create token index: {}", e);
+    let token_indexes = vec![
+        ("network_address", token_network_address_index),
+        ("symbol", token_symbol_index),
+        ("name", token_name_index),
+    ];
+    
+    for (name, index_model) in token_indexes {
+        match tokens_collection
+            .create_index(index_model, None)
+            .await
+        {
+            Ok(_) => info!("Created token index: {}", name),
+            Err(e) => {
+                if e.to_string().contains("already exists") {
+                    debug!("Token index {} already exists", name);
+                } else {
+                    warn!("Failed to create token index {}: {}", name, e);
+                }
             }
         }
     }
