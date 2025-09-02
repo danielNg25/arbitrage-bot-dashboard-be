@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
-use log::{debug, info};
-use mongodb::{bson::doc, Client, Collection, Database};
+use log::{debug, info, warn};
+use mongodb::{bson::doc, options::IndexOptions, Client, Collection, Database};
 use regex;
 
 use crate::{
@@ -32,6 +32,11 @@ pub async fn init_database(db_config: &DatabaseConfig) -> DbResult<Database> {
     let db = client.database(&db_config.database_name);
 
     debug!("Connected to MongoDB database: {}", db_config.database_name);
+
+    // Create indexes for better query performance
+    if let Err(e) = create_database_indexes(&db).await {
+        warn!("Failed to create database indexes: {}", e);
+    }
 
     Ok(db)
 }
@@ -224,57 +229,92 @@ pub async fn get_opportunities(
     let limit = limit.unwrap_or(100).min(1000); // Cap at 1000
     let skip = (page - 1) * limit;
 
-    // Get total count for pagination
+    // Get total count for pagination - MongoDB will automatically use the best index
     let total = opportunities_collection
         .count_documents(filter.clone(), None)
         .await?;
     let total_pages = ((total as f64) / (limit as f64)).ceil() as u32;
 
-    // Build simple aggregation pipeline - just pagination and token lookup
-    let pipeline = vec![
-        doc! { "$match": filter },
-        doc! {
-            "$sort": { "created_at": -1 }
-        },
-        doc! {
-            "$skip": skip as i64
-        },
-        doc! {
-            "$limit": limit as i64
-        },
-        doc! {
-            "$lookup": {
-                "from": "tokens",
-                "let": {
-                    "opp_network_id": "$network_id",
-                    "opp_profit_token": "$profit_token"
-                },
-                "pipeline": [
-                    doc! {
-                        "$match": {
-                            "$expr": {
-                                "$and": [
-                                    { "$eq": ["$network_id", "$$opp_network_id"] },
-                                    { "$eq": ["$address", "$$opp_profit_token"] }
-                                ]
-                            }
+    // Build optimized aggregation pipeline with projection and token lookup
+    let mut pipeline = vec![doc! { "$match": filter }];
+
+    // Add sorting, pagination, and projection
+    pipeline.push(doc! {
+        "$sort": { "created_at": -1 }
+    });
+
+    pipeline.push(doc! {
+        "$skip": skip as i64
+    });
+
+    pipeline.push(doc! {
+        "$limit": limit as i64
+    });
+
+    // Project only the fields we need before doing the lookup
+    pipeline.push(doc! {
+        "$project": {
+            "_id": 1,
+            "network_id": 1,
+            "status": 1,
+            "profit_usd": 1,
+            "estimate_profit_usd": 1,
+            "estimate_profit": 1,
+            "profit": 1,
+            "gas_usd": 1,
+            "created_at": 1,
+            "source_tx": 1,
+            "source_block_number": 1,
+            "execute_block_number": 1,
+            "profit_token": 1,
+            "simulation_time": 1,
+            "error": 1
+        }
+    });
+
+    // Optimized lookup with index hint
+    pipeline.push(doc! {
+        "$lookup": {
+            "from": "tokens",
+            "let": {
+                "opp_network_id": "$network_id",
+                "opp_profit_token": "$profit_token"
+            },
+            "pipeline": [
+                doc! {
+                    "$match": {
+                        "$expr": {
+                            "$and": [
+                                { "$eq": ["$network_id", "$$opp_network_id"] },
+                                { "$eq": ["$address", "$$opp_profit_token"] }
+                            ]
                         }
                     }
-                ],
-                "as": "token_info"
+                },
+                // Project only needed token fields
+                doc! {
+                    "$project": {
+                        "name": 1,
+                        "symbol": 1,
+                        "decimals": 1
+                    }
+                },
+                // Project only needed token fields (already done above)
+            ],
+            "as": "token_info"
+        }
+    });
+
+    pipeline.push(doc! {
+        "$addFields": {
+            "token_data": {
+                "$ifNull": [
+                    { "$arrayElemAt": ["$token_info", 0] },
+                    {}
+                ]
             }
-        },
-        doc! {
-            "$addFields": {
-                "token_data": {
-                    "$ifNull": [
-                        { "$arrayElemAt": ["$token_info", 0] },
-                        {}
-                    ]
-                }
-            }
-        },
-    ];
+        }
+    });
 
     // Execute aggregation pipeline
     let mut opportunities = Vec::new();
@@ -1475,4 +1515,130 @@ pub async fn get_summary_aggregations(
     }
 
     Ok(result)
+}
+
+/// Create database indexes for better query performance
+pub async fn create_database_indexes(db: &Database) -> DbResult<()> {
+    info!("Creating database indexes for performance optimization...");
+
+    // Opportunities collection indexes
+    let opportunities_collection: Collection<Opportunity> = db.collection("opportunities");
+
+    // Create indexes with options
+    let mut index_options = IndexOptions::default();
+    index_options.background = Some(true);
+
+    // Create index models using the builder pattern
+    let network_status_time_index = mongodb::IndexModel::builder()
+        .keys(doc! {
+            "network_id": 1,
+            "status": 1,
+            "created_at": -1
+        })
+        .options(Some(index_options.clone()))
+        .build();
+
+    // Compound index for profit filtering: network_id + profit_usd + created_at
+    let network_profit_time_index = mongodb::IndexModel::builder()
+        .keys(doc! {
+            "network_id": 1,
+            "profit_usd": 1,
+            "created_at": -1
+        })
+        .options(Some(index_options.clone()))
+        .build();
+
+    // Compound index for estimate profit filtering: network_id + estimate_profit_usd + created_at
+    let network_estimate_profit_time_index = mongodb::IndexModel::builder()
+        .keys(doc! {
+            "network_id": 1,
+            "estimate_profit_usd": 1,
+            "created_at": -1
+        })
+        .options(Some(index_options.clone()))
+        .build();
+
+    // Compound index for gas filtering: network_id + gas_usd + created_at
+    let network_gas_time_index = mongodb::IndexModel::builder()
+        .keys(doc! {
+            "network_id": 1,
+            "gas_usd": 1,
+            "created_at": -1
+        })
+        .options(Some(index_options.clone()))
+        .build();
+
+    // Single field indexes for common filters
+    let status_index = mongodb::IndexModel::builder()
+        .keys(doc! { "status": 1 })
+        .options(Some(index_options.clone()))
+        .build();
+
+    let created_at_index = mongodb::IndexModel::builder()
+        .keys(doc! { "created_at": -1 })
+        .options(Some(index_options.clone()))
+        .build();
+
+    let profit_token_index = mongodb::IndexModel::builder()
+        .keys(doc! { "profit_token": 1 })
+        .options(Some(index_options.clone()))
+        .build();
+
+    // Create all indexes
+    let indexes = vec![
+        ("network_status_time", network_status_time_index),
+        ("network_profit_time", network_profit_time_index),
+        (
+            "network_estimate_profit_time",
+            network_estimate_profit_time_index,
+        ),
+        ("network_gas_time", network_gas_time_index),
+        ("status", status_index),
+        ("created_at", created_at_index),
+        ("profit_token", profit_token_index),
+    ];
+
+    for (name, index_model) in indexes {
+        match opportunities_collection
+            .create_index(index_model, None)
+            .await
+        {
+            Ok(_) => info!("Created index: {}", name),
+            Err(e) => {
+                if e.to_string().contains("already exists") {
+                    debug!("Index {} already exists", name);
+                } else {
+                    warn!("Failed to create index {}: {}", name, e);
+                }
+            }
+        }
+    }
+
+    // Tokens collection indexes
+    let tokens_collection: Collection<crate::models::Token> = db.collection("tokens");
+
+    let token_network_address_index = mongodb::IndexModel::builder()
+        .keys(doc! {
+            "network_id": 1,
+            "address": 1
+        })
+        .options(Some(index_options.clone()))
+        .build();
+
+    match tokens_collection
+        .create_index(token_network_address_index, None)
+        .await
+    {
+        Ok(_) => info!("Created token index: network_address"),
+        Err(e) => {
+            if e.to_string().contains("already exists") {
+                debug!("Token index already exists");
+            } else {
+                warn!("Failed to create token index: {}", e);
+            }
+        }
+    }
+
+    info!("Database indexes creation completed");
+    Ok(())
 }
