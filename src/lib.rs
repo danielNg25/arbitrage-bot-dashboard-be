@@ -1,4 +1,5 @@
 pub mod config;
+pub mod contract;
 pub mod database;
 pub mod errors;
 pub mod handlers;
@@ -23,6 +24,7 @@ mod tests {
             1,
             "Ethereum".to_string(),
             Some("https://eth-mainnet.alchemyapi.io/v2/test".to_string()),
+            Some("0x3fC91A3afd70395Cd496C647d5a6CC9D4B2b7FAD".to_string()),
         );
         assert_eq!(network.chain_id, 1);
         assert_eq!(network.name, "Ethereum");

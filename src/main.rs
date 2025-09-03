@@ -3,6 +3,7 @@ use actix_web::{middleware::Logger, web, App, HttpServer};
 use log::info;
 
 mod config;
+mod contract;
 mod database;
 mod errors;
 mod handlers;

@@ -14,6 +14,7 @@ pub struct Network {
     pub name: String,
     pub rpc: Option<String>,
     pub block_explorer: Option<String>,
+    pub router_address: Option<String>, // Router contract address for this network
     pub executed: Option<u64>,
     pub success: Option<u64>,
     pub failed: Option<u64>,
@@ -25,13 +26,19 @@ pub struct Network {
 }
 
 impl Network {
-    pub fn new(chain_id: u64, name: String, rpc: Option<String>) -> Self {
+    pub fn new(
+        chain_id: u64,
+        name: String,
+        rpc: Option<String>,
+        router_address: Option<String>,
+    ) -> Self {
         Self {
             id: None,
             chain_id,
             name,
             rpc,
             block_explorer: None,
+            router_address,
             executed: None,
             success: None,
             failed: None,
@@ -215,6 +222,7 @@ pub struct NetworkResponse {
     pub name: String,
     pub rpc: Option<String>,
     pub block_explorer: Option<String>,
+    pub router_address: Option<String>, // Router contract address for this network
     pub executed: Option<u64>,
     pub success: Option<u64>,
     pub failed: Option<u64>,
@@ -530,6 +538,26 @@ pub struct NetworkAggregationQuery {
     pub end_time: Option<String>, // ISO 8601 or Unix timestamp
     pub limit: Option<u64>,
     pub offset: Option<u64>,
+}
+
+/// Debug Opportunity Request
+#[derive(Debug, Deserialize)]
+pub struct DebugOpportunityRequest {
+    pub opportunity: Opportunity,
+    pub block_number: Option<String>, // Block number to simulate at (optional, defaults to latest)
+    pub from_address: Option<String>, // Address to simulate from (optional, defaults to zero address)
+    pub to: Option<String>, // Router contract address to call (optional, defaults to a standard router)
+}
+
+/// Debug Opportunity Response
+#[derive(Debug, Serialize)]
+pub struct DebugOpportunityResponse {
+    pub success: bool,
+    pub error: Option<String>,
+    pub trace: Option<String>,
+    pub gas_used: Option<String>,
+    pub block_number: Option<String>,
+    pub transaction_data: Option<String>,
 }
 
 /// Summary Aggregation Response

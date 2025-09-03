@@ -3,8 +3,10 @@ use actix_web::{web, HttpResponse, Result};
 use actix_web_actors::ws;
 use log::{debug, error, info, warn};
 use mongodb::Database;
+use std::str::FromStr;
 
 use crate::{
+    contract::IUniversalRouter::IUniversalRouterInstance,
     database::{
         get_networks_with_stats, get_opportunities, get_profit_over_time, get_summary_aggregations,
         get_time_aggregations, get_token_performance,
@@ -12,10 +14,78 @@ use crate::{
     errors::ApiError,
     indexer::Indexer,
     models::{
-        NetworkAggregationQuery, OpportunityQuery, SummaryAggregationQuery, TimeAggregationQuery,
-        TokenPerformanceQuery,
+        DebugOpportunityRequest, DebugOpportunityResponse, NetworkAggregationQuery,
+        OpportunityQuery, SummaryAggregationQuery, TimeAggregationQuery, TokenPerformanceQuery,
     },
 };
+use alloy::{
+    hex::FromHex,
+    primitives::{Address, Bytes, U256},
+    providers::ProviderBuilder,
+    transports::http::reqwest::Url,
+};
+
+// ========================= ABI Implementation (from build_opp.rs) =========================
+
+pub struct TakeLastXBytes(pub usize);
+
+pub enum SolidityDataType<'a> {
+    String(&'a str),
+    Address(Address),
+    Bytes(&'a [u8]),
+    Bool(bool),
+    Number(U256),
+    NumberWithShift(U256, TakeLastXBytes),
+}
+
+pub mod abi {
+    use super::SolidityDataType;
+
+    /// Pack a single `SolidityDataType` into bytes
+    fn pack<'a>(data_type: &'a SolidityDataType) -> Vec<u8> {
+        let mut res = Vec::new();
+        match data_type {
+            SolidityDataType::String(s) => {
+                res.extend(s.as_bytes());
+            }
+            SolidityDataType::Address(a) => {
+                res.extend(a.0);
+            }
+            SolidityDataType::Number(n) => {
+                res.extend(n.to_be_bytes::<32>());
+            }
+            SolidityDataType::Bytes(b) => {
+                res.extend(*b);
+            }
+            SolidityDataType::Bool(b) => {
+                if *b {
+                    res.push(1);
+                } else {
+                    res.push(0);
+                }
+            }
+            SolidityDataType::NumberWithShift(n, to_take) => {
+                let local_res = n.to_be_bytes::<32>().to_vec();
+
+                let to_skip = local_res.len() - (to_take.0 / 8);
+                let local_res = local_res.into_iter().skip(to_skip).collect::<Vec<u8>>();
+                res.extend(local_res);
+            }
+        };
+        return res;
+    }
+
+    pub fn encode_packed(items: &[SolidityDataType]) -> (Vec<u8>, String) {
+        let res = items.iter().fold(Vec::new(), |mut acc, i| {
+            let pack = pack(i);
+            acc.push(pack);
+            acc
+        });
+        let res = res.join(&[][..]);
+        let hexed = hex::encode(&res);
+        (res, hexed)
+    }
+}
 
 // ========================= WebSocket: Opportunities =========================
 
@@ -651,4 +721,228 @@ pub async fn get_network_aggregations_handler(
             Err(ApiError::DatabaseError(e.to_string()))
         }
     }
+}
+
+// ========================= Debug Opportunity Handler =========================
+
+/// Debug opportunity by simulating the transaction using cast call
+pub async fn debug_opportunity_handler(
+    db: web::Data<Database>,
+    payload: web::Json<DebugOpportunityRequest>,
+) -> Result<HttpResponse, ApiError> {
+    info!("=== DEBUG OPPORTUNITY HANDLER CALLED ===");
+    info!(
+        "Received debug request for opportunity: {:?}",
+        payload.opportunity
+    );
+
+    // Get network information to find RPC URL
+    let networks = get_networks_with_stats(&db)
+        .await
+        .map_err(|e| ApiError::DatabaseError(e.to_string()))?;
+    let network = networks
+        .iter()
+        .find(|n| n.chain_id == payload.opportunity.network_id)
+        .ok_or_else(|| ApiError::DatabaseError("Network not found".to_string()))?;
+
+    let rpc_url = network
+        .rpc
+        .as_ref()
+        .ok_or_else(|| ApiError::DatabaseError("RPC URL not configured for network".to_string()))?;
+
+    // Build transaction data from opportunity
+    let transaction_data = build_transaction_data(&payload.opportunity)?;
+
+    // Determine from address (use a default address if not provided)
+    let from_address = payload
+        .from_address
+        .as_ref()
+        .map(|s| s.clone())
+        .unwrap_or_else(|| "0x0000000000000000000000000000000000000000".to_string());
+
+    // Use source block number if no specific block is provided
+    let block_number = payload
+        .block_number
+        .as_ref()
+        .map(|s| s.clone())
+        .unwrap_or_else(|| {
+            if let Some(source_block) = payload.opportunity.source_block_number {
+                source_block.to_string()
+            } else {
+                "latest".to_string()
+            }
+        });
+
+    // Use the provided "to" address, or the network's router_address, or return an error
+    let to_address = if let Some(to) = payload.to.as_ref() {
+        to.clone()
+    } else if let Some(router) = &network.router_address {
+        router.clone()
+    } else {
+        // Return an error if no router address is provided or configured
+        error!(
+            "No router address provided or configured for network {}",
+            network.name
+        );
+        return Err(ApiError::BadRequest(format!(
+            "No router address provided in request and no default router configured for network {}",
+            network.name
+        )));
+    };
+
+    info!("Using router address: {}", to_address);
+
+    // Execute cast call
+    match execute_cast_call(
+        &transaction_data,
+        rpc_url,
+        &from_address,
+        &to_address,
+        Some(&block_number),
+    )
+    .await
+    {
+        Ok(trace_output) => {
+            info!(
+                "Cast call executed successfully for opportunity: {:?}",
+                payload.opportunity.id
+            );
+            let gas_used = extract_gas_used(&trace_output);
+
+            Ok(HttpResponse::Ok().json(DebugOpportunityResponse {
+                success: true,
+                error: None,
+                trace: Some(trace_output),
+                gas_used,
+                block_number: payload.block_number.clone(),
+                transaction_data: Some(transaction_data),
+            }))
+        }
+        Err(e) => {
+            error!(
+                "Cast call failed for opportunity {:?}: {}",
+                payload.opportunity.id, e
+            );
+            Ok(HttpResponse::Ok().json(DebugOpportunityResponse {
+                success: false,
+                error: Some(e.to_string()),
+                trace: None,
+                gas_used: None,
+                block_number: payload.block_number.clone(),
+                transaction_data: Some(transaction_data),
+            }))
+        }
+    }
+}
+
+/// Build transaction data from opportunity (completely following build_opp.rs pattern)
+fn build_transaction_data(opportunity: &crate::models::Opportunity) -> Result<String, ApiError> {
+    // Get the path from opportunity (similar to opportunity.cycle in build_opp.rs)
+    let path = if let Some(path) = &opportunity.path {
+        path
+    } else {
+        return Err(ApiError::DatabaseError(
+            "Opportunity path is required for transaction building".to_string(),
+        ));
+    };
+
+    // Build the path exactly like build_opp.rs
+    // Process from the middle to the beginning (reverse order)
+    let path_length = path.len();
+    let mut path_items: Vec<SolidityDataType> = Vec::new();
+
+    // Start from path_length/2 down to 1
+    for i in (1..=(path_length / 2)).rev() {
+        // Calculate indices for token and pool
+        let token_idx = (i - 1) * 2;
+        let pool_idx = token_idx + 1;
+
+        // Make sure indices are valid
+        if token_idx < path.len() && pool_idx < path.len() {
+            let token_address = Address::from_str(&path[token_idx]).unwrap();
+            path_items.push(SolidityDataType::Address(token_address));
+
+            // Get pool address
+            let pool_address = Address::from_str(&path[pool_idx]).unwrap();
+            path_items.push(SolidityDataType::Address(pool_address));
+        }
+    }
+
+    // Use the exact same encode_packed function as build_opp.rs
+    let (_, encoded) = abi::encode_packed(&path_items);
+    let data = Bytes::from_hex(encoded).unwrap();
+
+    // Calculate amount exactly like build_opp.rs
+    let amount = U256::from_str(opportunity.amount.as_str()).unwrap()
+        + U256::from_str(opportunity.estimate_profit.as_ref().unwrap().as_str()).unwrap();
+
+    let provider =
+        ProviderBuilder::new().connect_http(Url::parse("https://www.google.com/").unwrap());
+
+    let router = IUniversalRouterInstance::new(Address::ZERO, provider);
+    let swap_data = router.swap(amount, data).calldata().to_string();
+    info!("Swap data: {:?}", swap_data);
+    Ok(swap_data)
+}
+
+/// Execute cast call using tokio::process::Command for better async performance
+async fn execute_cast_call(
+    data: &str,
+    rpc_url: &str,
+    from: &str,
+    to: &str,
+    block: Option<&str>,
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+    use tokio::process::Command;
+    info!(
+        "Executing cast call with data: {:?}, rpc_url: {:?}, from: {:?}, to: {:?}, block: {:?}",
+        data, rpc_url, from, to, block
+    );
+
+    // Build command with all arguments at once for better performance
+    let mut cmd = Command::new("cast");
+    cmd.arg("call")
+        .arg("--data")
+        .arg(data)
+        .arg("--rpc-url")
+        .arg(rpc_url)
+        .arg("--from")
+        .arg(from)
+        .arg("--trace");
+
+    // Add block parameter if provided
+    if let Some(block) = block {
+        cmd.arg("--block").arg(block);
+    }
+
+    // Add the target address as positional argument
+    cmd.arg(to);
+
+    info!("Executing cast command: {:?}", cmd);
+
+    // Use tokio::process::Command for non-blocking async execution
+    let output = cmd.output().await?;
+
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    } else {
+        Err(format!(
+            "Cast call failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        )
+        .into())
+    }
+}
+
+/// Extract gas used from trace output
+fn extract_gas_used(trace_output: &str) -> Option<String> {
+    for line in trace_output.lines() {
+        if line.contains("Gas used:") {
+            return line
+                .split("Gas used: ")
+                .nth(1)
+                .map(|s| s.trim().to_string());
+        }
+    }
+    None
 }
