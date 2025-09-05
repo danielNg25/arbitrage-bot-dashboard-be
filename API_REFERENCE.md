@@ -1,6 +1,6 @@
 ## Arbitrage Bot API Reference
 
-Base URL: `http://localhost:8081`
+Base URL: `http://localhost:8081/api/v1/networks`
 
 Media type: `application/json`
 
@@ -51,6 +51,8 @@ interface NetworkResponse {
     name: string;
     rpc: string | null;
     block_explorer: string | null;
+    router_address: string | null;
+    executors: string[] | null; // Executor addresses for this network
     executed: number | null;
     success: number | null;
     failed: number | null;

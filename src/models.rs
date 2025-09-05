@@ -15,6 +15,7 @@ pub struct Network {
     pub rpc: Option<String>,
     pub block_explorer: Option<String>,
     pub router_address: Option<String>, // Router contract address for this network
+    pub executors: Option<Vec<String>>,
     pub executed: Option<u64>,
     pub success: Option<u64>,
     pub failed: Option<u64>,
@@ -31,6 +32,7 @@ impl Network {
         name: String,
         rpc: Option<String>,
         router_address: Option<String>,
+        executors: Option<Vec<String>>,
     ) -> Self {
         Self {
             id: None,
@@ -39,6 +41,7 @@ impl Network {
             rpc,
             block_explorer: None,
             router_address,
+            executors,
             executed: None,
             success: None,
             failed: None,
@@ -223,6 +226,7 @@ pub struct NetworkResponse {
     pub rpc: Option<String>,
     pub block_explorer: Option<String>,
     pub router_address: Option<String>, // Router contract address for this network
+    pub executors: Option<Vec<String>>, // Executor addresses for this network
     pub executed: Option<u64>,
     pub success: Option<u64>,
     pub failed: Option<u64>,

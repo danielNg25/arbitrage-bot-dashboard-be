@@ -36,8 +36,8 @@ Debug an opportunity by simulating the transaction using Foundry's `cast call` a
 | Field          | Type          | Required | Description                                                                          |
 | -------------- | ------------- | -------- | ------------------------------------------------------------------------------------ |
 | `opportunity`  | `Opportunity` | Yes      | The opportunity object to debug                                                      |
-| `block_number` | `string`      | Yes       | Block number to simulate at (defaults to latest)                                     |
-| `from_address` | `string`      | Yes       | Address to simulate from (defaults to zero address)                                  |
+| `block_number` | `string`      | Yes      | Block number to simulate at (defaults to latest)                                     |
+| `from_address` | `string`      | Yes      | Address to simulate from (defaults to zero address)                                  |
 | `to`           | `string`      | No\*     | Router contract address to call (defaults to network's router_address if configured) |
 
 \*Either `to` parameter or network's router_address must be provided
