@@ -656,15 +656,19 @@ pub async fn get_opportunity_details(
         estimate_profit_usd: opportunity.estimate_profit_usd,
         path: opportunity.path.clone(),
         received_at: opportunity.received_at.map(|ts| {
-            DateTime::from_timestamp(ts as i64, 0)
+            let seconds = ts as i64 / 1000;
+            let milliseconds = (ts % 1000) as u32;
+            DateTime::from_timestamp(seconds, milliseconds * 1_000_000)
                 .unwrap_or_else(|| Utc::now())
-                .format("%Y-%m-%dT%H:%M:%SZ")
+                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
                 .to_string()
         }),
         send_at: opportunity.send_at.map(|ts| {
-            DateTime::from_timestamp(ts as i64, 0)
+            let seconds = ts as i64 / 1000;
+            let milliseconds = (ts % 1000) as u32;
+            DateTime::from_timestamp(seconds, milliseconds * 1_000_000)
                 .unwrap_or_else(|| Utc::now())
-                .format("%Y-%m-%dT%H:%M:%SZ")
+                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
                 .to_string()
         }),
         simulation_time: opportunity.simulation_time,
@@ -889,15 +893,19 @@ pub async fn get_opportunity_details_by_tx_hash(
         estimate_profit_usd: opportunity.estimate_profit_usd,
         path: opportunity.path.clone(),
         received_at: opportunity.received_at.map(|ts| {
-            DateTime::from_timestamp(ts as i64, 0)
+            let seconds = ts as i64 / 1000;
+            let milliseconds = (ts % 1000) as u32;
+            DateTime::from_timestamp(seconds, milliseconds * 1_000_000)
                 .unwrap_or_else(|| Utc::now())
-                .format("%Y-%m-%dT%H:%M:%SZ")
+                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
                 .to_string()
         }),
         send_at: opportunity.send_at.map(|ts| {
-            DateTime::from_timestamp(ts as i64, 0)
+            let seconds = ts as i64 / 1000;
+            let milliseconds = (ts % 1000) as u32;
+            DateTime::from_timestamp(seconds, milliseconds * 1_000_000)
                 .unwrap_or_else(|| Utc::now())
-                .format("%Y-%m-%dT%H:%M:%SZ")
+                .format("%Y-%m-%dT%H:%M:%S%.3fZ")
                 .to_string()
         }),
         simulation_time: opportunity.simulation_time,

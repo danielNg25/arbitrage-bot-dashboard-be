@@ -487,8 +487,8 @@ interface OpportunityDetailsData {
     estimate_profit: string | null;
     estimate_profit_usd: number | null;
     path: string[] | null;
-    received_at: string | null; // ISO 8601
-    send_at: string | null; // ISO 8601
+    received_at: string | null; // ISO 8601 with milliseconds (e.g., "2025-09-02T12:07:17.258Z")
+    send_at: string | null; // ISO 8601 with milliseconds (e.g., "2025-09-02T12:07:17.258Z")
     simulation_time: number | null;
     error: string | null;
     gas_amount: number | null;
