@@ -9,7 +9,7 @@ use crate::{
     contract::IUniversalRouter::IUniversalRouterInstance,
     database::{
         get_networks_with_stats, get_opportunities, get_profit_over_time, get_summary_aggregations,
-        get_time_aggregations, get_token_performance,
+        get_time_aggregations, get_token_performance, prune_old_opportunities,
     },
     errors::ApiError,
     indexer::Indexer,
@@ -593,6 +593,26 @@ pub async fn trigger_indexing_handler(db: web::Data<Database>) -> Result<HttpRes
         }
         Err(e) => {
             error!("Manual indexing failed: {}", e);
+            Err(ApiError::DatabaseError(e.to_string()))
+        }
+    }
+}
+
+/// POST /admin/prune - Manually trigger opportunity pruning
+pub async fn trigger_pruning_handler(db: web::Data<Database>) -> Result<HttpResponse, ApiError> {
+    info!("Handling POST /admin/prune request - triggering manual opportunity pruning");
+
+    match prune_old_opportunities(&db).await {
+        Ok(_) => {
+            info!("Manual opportunity pruning completed successfully");
+            Ok(HttpResponse::Ok().json(serde_json::json!({
+                "status": "success",
+                "message": "Opportunity pruning completed successfully",
+                "timestamp": chrono::Utc::now().to_rfc3339()
+            })))
+        }
+        Err(e) => {
+            error!("Manual opportunity pruning failed: {}", e);
             Err(ApiError::DatabaseError(e.to_string()))
         }
     }

@@ -1172,6 +1172,66 @@ pub async fn prune_old_hourly_data(db: &Database, retention_hours: u64) -> DbRes
     Ok(())
 }
 
+/// Prune old opportunities that are older than 7 days and have low profit values
+pub async fn prune_old_opportunities(db: &Database) -> DbResult<()> {
+    let opportunities_collection: Collection<Opportunity> = db.collection("opportunities");
+
+    // Calculate cutoff timestamp (7 days ago)
+    let cutoff_timestamp = Utc::now()
+        .checked_sub_signed(chrono::Duration::days(7))
+        .unwrap_or(Utc::now())
+        .timestamp() as u64;
+
+    info!(
+        "Pruning opportunities older than 7 days (before timestamp {}) with low profit values",
+        cutoff_timestamp
+    );
+
+    // Create filter for opportunities that are:
+    // 1. Older than 7 days
+    // 2. Have BOTH profit_usd AND estimate_profit_usd either null, missing, or < 1.0
+    let filter = doc! {
+        "created_at": { "$lt": cutoff_timestamp as i64 },
+        "$and": [
+            {
+                "$or": [
+                    { "profit_usd": { "$lt": 1.0 } },
+                    { "profit_usd": null },
+                    { "profit_usd": { "$exists": false } }
+                ]
+            },
+            {
+                "$or": [
+                    { "estimate_profit_usd": { "$lt": 1.0 } },
+                    { "estimate_profit_usd": null },
+                    { "estimate_profit_usd": { "$exists": false } }
+                ]
+            }
+        ]
+    };
+
+    // First, count how many records will be deleted for logging
+    let count_result = opportunities_collection
+        .count_documents(filter.clone(), None)
+        .await?;
+    info!("Found {} opportunities to prune", count_result);
+
+    if count_result == 0 {
+        info!("No opportunities found matching pruning criteria");
+        return Ok(());
+    }
+
+    // Delete the matching opportunities
+    let delete_result = opportunities_collection.delete_many(filter, None).await?;
+
+    info!(
+        "Successfully pruned {} old opportunities with low profit values",
+        delete_result.deleted_count
+    );
+
+    Ok(())
+}
+
 /// Get time aggregations with filtering
 pub async fn get_time_aggregations(
     db: &Database,

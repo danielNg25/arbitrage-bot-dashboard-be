@@ -1,5 +1,6 @@
 use crate::database::{
-    prune_old_hourly_data, upsert_summary_aggregation, upsert_time_aggregation, DbResult,
+    prune_old_hourly_data, prune_old_opportunities, upsert_summary_aggregation,
+    upsert_time_aggregation, DbResult,
 };
 use crate::models::{
     Network, Opportunity, SummaryAggregation, TimeAggregation, TimeAggregationPeriod, Token,
@@ -132,6 +133,13 @@ impl Indexer {
             warn!("Failed to prune old hourly data: {}", e);
         } else {
             info!("Successfully pruned old hourly data");
+        }
+
+        // Prune old opportunities with low profit values
+        if let Err(e) = prune_old_opportunities(db).await {
+            warn!("Failed to prune old opportunities: {}", e);
+        } else {
+            info!("Successfully pruned old opportunities");
         }
 
         let duration = start_time.elapsed();

@@ -17,6 +17,7 @@ Media type: `application/json`
 -   GET `/api/v1/opportunities/tx/{tx_hash}`
 -   GET `/api/v1/opportunities/profit-over-time`
 -   POST `/api/v1/admin/index`
+-   POST `/api/v1/admin/prune`
 
 ---
 
@@ -564,6 +565,24 @@ Response 200:
 {
     "status": "success",
     "message": "Indexing completed successfully",
+    "timestamp": "2024-01-01T00:00:00Z"
+}
+```
+
+---
+
+### POST /api/v1/admin/prune
+
+-   Description: Manually trigger pruning of old opportunities with low profit values
+-   Request body: none
+-   Pruning criteria: Removes opportunities that are older than 7 days AND have BOTH `profit_usd` AND `estimate_profit_usd` either null, missing, or < 1.0
+
+Response 200:
+
+```json
+{
+    "status": "success",
+    "message": "Opportunity pruning completed successfully",
     "timestamp": "2024-01-01T00:00:00Z"
 }
 ```
