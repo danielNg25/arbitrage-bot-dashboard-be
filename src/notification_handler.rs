@@ -131,7 +131,11 @@ impl NotificationHandler {
                 };
 
                 let amount = format_units(
-                    U256::from_str_radix(&opportunity.amount, 10).unwrap_or(U256::ZERO),
+                    U256::from_str_radix(
+                        opportunity.profit.unwrap_or(String::from("0")).as_ref(),
+                        10,
+                    )
+                    .unwrap_or(U256::ZERO),
                     token_decimals,
                 )
                 .unwrap_or("0.0".to_string())
