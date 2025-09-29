@@ -72,7 +72,7 @@ pub struct Token {
 }
 
 impl Token {
-    pub fn new(
+    pub fn _new(
         network_id: u64,
         address: &Address,
         name: Option<String>,
@@ -110,7 +110,7 @@ pub struct Pool {
 }
 
 impl Pool {
-    pub fn new(network_id: u64, address: &Address, tokens: &[Address], pool_type: &str) -> Self {
+    pub fn _new(network_id: u64, address: &Address, tokens: &[Address], pool_type: &str) -> Self {
         Self {
             id: None,
             network_id,
@@ -157,7 +157,7 @@ pub struct Opportunity {
 }
 
 impl Opportunity {
-    pub fn new(
+    pub fn _new(
         network_id: u64,
         profit_token: &Address,
         amount: &U256,
@@ -208,14 +208,14 @@ impl Opportunity {
 
 // OpportunityDebug model removed - now integrated into unified Opportunity model
 
-pub enum PoolType {
-    /// Uniswap V2-compatible pool (constant product formula)
-    UniswapV2,
-    /// Uniswap V3-compatible pool (concentrated liquidity)
-    UniswapV3,
-    /// ERC4626-compatible pool
-    ERC4626,
-}
+// pub enum PoolType {
+//     /// Uniswap V2-compatible pool (constant product formula)
+//     UniswapV2,
+//     /// Uniswap V3-compatible pool (concentrated liquidity)
+//     UniswapV3,
+//     /// ERC4626-compatible pool
+//     ERC4626,
+// }
 
 // Response models for API endpoints
 #[derive(Debug, Serialize)]
@@ -536,8 +536,8 @@ pub struct SummaryAggregationQuery {
 /// Network Aggregation Query Parameters (for specific network aggregations)
 #[derive(Debug, Deserialize)]
 pub struct NetworkAggregationQuery {
-    pub network_id: Option<u64>, // Optional - will be set from path parameter
-    pub period: Option<String>,  // "hourly", "daily", "monthly"
+    pub _network_id: Option<u64>, // Optional - will be set from path parameter
+    pub period: Option<String>,   // "hourly", "daily", "monthly"
     pub start_time: Option<String>, // ISO 8601 or Unix timestamp
     pub end_time: Option<String>, // ISO 8601 or Unix timestamp
     pub limit: Option<u64>,

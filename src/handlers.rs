@@ -3,7 +3,8 @@ use actix_web::{web, HttpResponse, Result};
 use actix_web_actors::ws;
 use log::{debug, error, info, warn};
 use mongodb::Database;
-use std::str::FromStr;
+use std::{str::FromStr, sync::Arc};
+use tokio::sync::mpsc;
 
 use crate::{
     contract::IUniversalRouter::IUniversalRouterInstance,
@@ -12,7 +13,7 @@ use crate::{
         get_time_aggregations, get_token_performance, prune_old_opportunities,
     },
     errors::ApiError,
-    indexer::Indexer,
+    indexer::{Indexer, NotificationConfig},
     models::{
         DebugOpportunityRequest, DebugOpportunityResponse, NetworkAggregationQuery,
         OpportunityQuery, SummaryAggregationQuery, TimeAggregationQuery, TokenPerformanceQuery,
@@ -580,7 +581,13 @@ pub async fn trigger_indexing_handler(db: web::Data<Database>) -> Result<HttpRes
 
     // Create a temporary indexer instance for manual run
     let db_arc = std::sync::Arc::new(db.get_ref().clone());
-    let _indexer = Indexer::new(db_arc.clone(), 5, 168); // Default interval for manual runs
+    let (notification_tx, _notification_rx) = mpsc::channel(100);
+    let _indexer = Indexer::new(
+        db_arc.clone(),
+        5,
+        168,
+        Arc::new(NotificationConfig::new(notification_tx, 1.0)),
+    ); // Default interval for manual runs
 
     match Indexer::run_manual_indexing(&db_arc).await {
         Ok(_) => {

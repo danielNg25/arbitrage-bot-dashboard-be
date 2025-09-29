@@ -8,6 +8,7 @@ pub struct Config {
     pub database: DatabaseConfig,
     pub cors: CorsConfig,
     pub indexer: IndexerConfig,
+    pub telegram: TelegramConfig,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -37,6 +38,13 @@ pub struct CorsConfig {
 pub struct IndexerConfig {
     pub interval_minutes: u64,
     pub hourly_data_retention_hours: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TelegramConfig {
+    pub token: Option<String>,
+    pub chat_id: Option<String>,
+    pub min_profit_usd: f64,
 }
 
 impl Default for Config {
@@ -71,6 +79,11 @@ impl Default for Config {
             indexer: IndexerConfig {
                 interval_minutes: 5,
                 hourly_data_retention_hours: 168, // 7 days * 24 hours
+            },
+            telegram: TelegramConfig {
+                token: None,
+                chat_id: None,
+                min_profit_usd: 2.0,
             },
         }
     }
@@ -126,16 +139,16 @@ impl Config {
                 origins.split(',').map(|s| s.trim().to_string()).collect();
         }
 
-        config
-    }
+        // Telegram configuration
+        if let Ok(token) = std::env::var("TELEGRAM_BOT_TOKEN") {
+            config.telegram.token = Some(token);
+        }
 
-    pub fn save_to_file<P: AsRef<Path>>(
-        &self,
-        path: P,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let toml_string = toml::to_string_pretty(self)?;
-        fs::write(path, toml_string)?;
-        Ok(())
+        if let Ok(chat_id) = std::env::var("TELEGRAM_CHAT_ID") {
+            config.telegram.chat_id = Some(chat_id);
+        }
+
+        config
     }
 }
 

@@ -6,6 +6,7 @@ use crate::models::{
     Network, Opportunity, SummaryAggregation, TimeAggregation, TimeAggregationPeriod, Token,
     TokenAggregation,
 };
+use crate::notification_handler::NotificationType;
 use alloy::primitives::U256;
 use chrono::{DateTime, Datelike, TimeZone, Timelike, Utc};
 use futures::StreamExt;
@@ -13,23 +14,45 @@ use log::{debug, error, info, warn};
 use mongodb::{bson::doc, Collection, Database};
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::mpsc::Sender;
 use tokio::sync::Mutex;
 use tokio::time::Duration;
+
+pub struct NotificationConfig {
+    notification_tx: Sender<NotificationType>,
+    min_profit_usd: f64,
+}
+
+impl NotificationConfig {
+    pub fn new(notification_tx: Sender<NotificationType>, min_profit_usd: f64) -> Self {
+        Self {
+            notification_tx,
+            min_profit_usd,
+        }
+    }
+}
 
 pub struct Indexer {
     db: Arc<Database>,
     running: Arc<Mutex<bool>>,
     interval_minutes: u64,
     hourly_data_retention_hours: u64,
+    notification: Arc<NotificationConfig>,
 }
 
 impl Indexer {
-    pub fn new(db: Arc<Database>, interval_minutes: u64, hourly_data_retention_hours: u64) -> Self {
+    pub fn new(
+        db: Arc<Database>,
+        interval_minutes: u64,
+        hourly_data_retention_hours: u64,
+        notification: Arc<NotificationConfig>,
+    ) -> Self {
         Self {
             db,
             running: Arc::new(Mutex::new(false)),
             interval_minutes,
             hourly_data_retention_hours,
+            notification,
         }
     }
 
@@ -51,6 +74,7 @@ impl Indexer {
         let running = Arc::clone(&self.running);
         let interval_minutes = self.interval_minutes;
         let hourly_data_retention_hours = self.hourly_data_retention_hours;
+        let notification = Arc::clone(&self.notification);
 
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(60 * interval_minutes));
@@ -69,20 +93,30 @@ impl Indexer {
                 interval.tick().await;
 
                 // Run indexing
-                if let Err(e) = Self::run_indexing_cycle(&db, hourly_data_retention_hours).await {
+                if let Err(e) = Self::run_indexing_cycle(
+                    &db,
+                    hourly_data_retention_hours,
+                    Some(notification.clone()),
+                )
+                .await
+                {
                     error!("Indexing cycle failed: {}", e);
                 }
             }
         });
     }
 
-    pub async fn stop(&self) {
+    pub async fn _stop(&self) {
         let mut running = self.running.lock().await;
         *running = false;
         info!("Stopping indexer...");
     }
 
-    async fn run_indexing_cycle(db: &Database, hourly_data_retention_hours: u64) -> DbResult<()> {
+    async fn run_indexing_cycle(
+        db: &Database,
+        hourly_data_retention_hours: u64,
+        notification: Option<Arc<NotificationConfig>>,
+    ) -> DbResult<()> {
         info!("Starting indexing cycle");
         let start_time = std::time::Instant::now();
 
@@ -140,6 +174,18 @@ impl Indexer {
             warn!("Failed to prune old opportunities: {}", e);
         } else {
             info!("Successfully pruned old opportunities");
+        }
+
+        // Send notification if configured
+        if let Some(notification) = notification {
+            for opportunity in all_opportunities {
+                if opportunity.profit_usd.unwrap_or(0.0) >= notification.min_profit_usd {
+                    notification
+                        .notification_tx
+                        .send(NotificationType::HighOpportunity(opportunity))
+                        .await?;
+                }
+            }
         }
 
         let duration = start_time.elapsed();
@@ -457,7 +503,7 @@ impl Indexer {
 
     pub async fn run_manual_indexing(db: &Database) -> DbResult<()> {
         info!("Running manual indexing cycle");
-        Self::run_indexing_cycle(db, 168).await
+        Self::run_indexing_cycle(db, 168, None).await
     }
 
     /// Create time aggregations for hourly, daily, and monthly periods

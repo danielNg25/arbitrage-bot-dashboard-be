@@ -1,6 +1,8 @@
 use actix_cors::Cors;
 use actix_web::{middleware::Logger, web, App, HttpServer};
 use log::info;
+use std::sync::Arc;
+use tokio::sync::mpsc;
 
 mod config;
 mod contract;
@@ -9,13 +11,17 @@ mod errors;
 mod handlers;
 mod indexer;
 mod models;
+mod notification_handler;
 mod routes;
 mod utils;
 
 use config::Config;
 use database::init_database;
 use indexer::Indexer;
+use notification_handler::NotificationHandler;
 use routes::configure_routes;
+
+use crate::indexer::NotificationConfig;
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
@@ -33,18 +39,39 @@ async fn main() -> std::io::Result<()> {
         .await
         .expect("Failed to initialize database");
 
+    // Create shared database connection
+    let db_arc = Arc::new(db.clone());
+    let (notification_tx, mut notification_rx) = mpsc::channel(100);
+
     // Start the background indexer
-    let db_arc = std::sync::Arc::new(db.clone());
     let indexer = Indexer::new(
-        db_arc,
+        db_arc.clone(),
         config.indexer.interval_minutes,
         config.indexer.hourly_data_retention_hours,
+        Arc::new(NotificationConfig::new(
+            notification_tx,
+            config.telegram.min_profit_usd,
+        )),
     );
     indexer.start().await;
     info!(
         "Background indexer started ({} minute interval)",
         config.indexer.interval_minutes
     );
+
+    // Initialize notification handler if configured
+    let notification_handler =
+        Arc::new(NotificationHandler::from_config(&config, db_arc.clone()).unwrap());
+
+    if notification_handler.is_configured() {
+        info!("Telegram notification handler initialized");
+        tokio::spawn(async move {
+            while let Some(opportunity) = notification_rx.recv().await {
+                let handler_clone = notification_handler.clone();
+                tokio::spawn(async move { handler_clone.send_notification(opportunity).await });
+            }
+        });
+    }
 
     // Build bind address from config
     let bind_addr = format!("{}:{}", config.server.host, config.server.port);

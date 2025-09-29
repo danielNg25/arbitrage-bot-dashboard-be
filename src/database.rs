@@ -90,6 +90,29 @@ pub async fn get_networks_with_stats(
     Ok(networks)
 }
 
+pub async fn get_network(db: &Database, network_id: u64) -> DbResult<Network> {
+    let networks_collection: Collection<Network> = db.collection("networks");
+    let network = networks_collection
+        .find_one(doc! { "chain_id": network_id as i64 }, None)
+        .await?;
+    Ok(network.unwrap())
+}
+
+pub async fn get_token(db: &Database, network_id: u64, token_address: &str) -> DbResult<Token> {
+    let tokens_collection: Collection<Token> = db.collection("tokens");
+    info!(
+        "Getting token for network_id: {} and token_address: {}",
+        network_id, token_address
+    );
+    let token = tokens_collection
+        .find_one(
+            doc! { "network_id": network_id as i64, "address": token_address.to_lowercase() },
+            None,
+        )
+        .await?;
+    Ok(token.unwrap())
+}
+
 pub async fn get_opportunities(
     db: &Database,
     network_id: Option<u64>,
