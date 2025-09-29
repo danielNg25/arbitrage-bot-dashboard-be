@@ -27,4 +27,4 @@ alloy = { version = "1.0.27", features = ["full"] }
 bson = "2.8"
 regex = "1.10"
 # Telegram bot
-teloxide = { version = "0.17", features = ["macros"] }
+teloxide = { version = "0.12", features = ["macros"] }

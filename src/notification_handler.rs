@@ -1,3 +1,5 @@
+use alloy::primitives::utils::format_units;
+use alloy::primitives::U256;
 use log::info;
 use mongodb::Database;
 use std::sync::Arc;
@@ -101,11 +103,14 @@ impl NotificationHandler {
                     .map(|n| n.name)
                     .unwrap_or_else(|| format!("Chain #{}", opportunity.network_id));
 
-                let token = self
+                let token_object = self
                     .get_token(opportunity.network_id, &opportunity.profit_token)
-                    .await
+                    .await;
+                let token = token_object
+                    .clone()
                     .and_then(|t| t.symbol)
                     .unwrap_or_else(|| "Unknown".to_string());
+                let token_decimals = token_object.and_then(|t| t.decimals).unwrap_or_else(|| 18);
 
                 // Get opportunity ID
                 let id = opportunity.id.map(|id| id.to_hex()).unwrap_or_default();
@@ -125,15 +130,32 @@ impl NotificationHandler {
                     "".to_string()
                 };
 
+                let amount = format_units(
+                    U256::from_str_radix(&opportunity.amount, 10).unwrap_or(U256::ZERO),
+                    token_decimals,
+                )
+                .unwrap_or("0.0".to_string())
+                .parse::<f64>()
+                .unwrap_or(0.0);
+
+                let estimate_profit = opportunity.estimate_profit.unwrap_or("Unknown".to_string());
+                let estimate_profit = format_units(
+                    U256::from_str_radix(&estimate_profit, 10).unwrap_or(U256::ZERO),
+                    token_decimals,
+                )
+                .unwrap_or("0.0".to_string())
+                .parse::<f64>()
+                .unwrap_or(0.0);
+
                 let message = match opportunity.status.as_str().to_lowercase().as_str() {
                     "succeeded" => {
                         format!(
                             "🟢 *{:.4}* {} ~ $*{:.2}*\nStatus: *SUCCESS*\nNetwork: *{}*\nEstimated: *{:.4}* {} ~ $*{:.2}*\nGas: $*{:.2}*",
-                            opportunity.amount,
+                            amount,
                             token,
                             opportunity.profit_usd.unwrap_or(0.0),
                             chain_name,
-                            opportunity.estimate_profit.unwrap_or("Unknown".to_string()),
+                            estimate_profit,
                             token,
                             opportunity.estimate_profit_usd.unwrap_or(0.0),
                             opportunity.gas_usd.unwrap_or(0.0)
@@ -142,11 +164,11 @@ impl NotificationHandler {
                     "partially_succeeded" => {
                         format!(
                             "🟡 *{:.4}* {} ~ $*{:.2}*\nStatus: *PARTIAL*\nNetwork: *{}*\nEstimated: *{:.4}* {} ~ $*{:.2}*\nGas: $*{:.2}*",
-                            opportunity.amount,
+                            amount,
                             token,
                             opportunity.profit_usd.unwrap_or(0.0),
                             chain_name,
-                            opportunity.estimate_profit.unwrap_or("Unknown".to_string()),
+                            estimate_profit,
                             token,
                             opportunity.estimate_profit_usd.unwrap_or(0.0),
                             opportunity.gas_usd.unwrap_or(0.0)
@@ -155,7 +177,7 @@ impl NotificationHandler {
                     "reverted" => {
                         format!(
                             "🔴*{:.4}* {} ~ $*{:.2}*\nStatus: *REVERTED*\nNetwork: *{}*\nGas: $*{:.2}*",
-                            opportunity.estimate_profit.unwrap_or("Unknown".to_string()),
+                            amount,
                             token,
                             opportunity.estimate_profit_usd.unwrap_or(0.0),
                             chain_name,
@@ -165,7 +187,7 @@ impl NotificationHandler {
                     "error" => {
                         format!(
                             "🔴*{:.4}* {} ~ $*{:.2}*\nStatus: *ERROR*\nNetwork: *{}*",
-                            opportunity.estimate_profit.unwrap_or("Unknown".to_string()),
+                            amount,
                             token,
                             opportunity.estimate_profit_usd.unwrap_or(0.0),
                             chain_name,
@@ -211,10 +233,21 @@ impl NotificationHandler {
                     .bot
                     .send_message(self.chat_id.clone(), final_message)
                     .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+                    .disable_web_page_preview(true)
                     .send()
                     .await
                 {
                     eprintln!("Failed to send notification: {}", e);
+                    if let Err(e) = self
+                        .bot
+                        .send_message(self.chat_id.clone(), "Error sending notification")
+                        .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+                        .disable_web_page_preview(true)
+                        .send()
+                        .await
+                    {
+                        eprintln!("Failed to send failed notification: {}", e);
+                    }
                 }
             }
         }
