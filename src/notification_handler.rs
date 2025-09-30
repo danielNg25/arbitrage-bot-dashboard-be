@@ -130,7 +130,7 @@ impl NotificationHandler {
                     "".to_string()
                 };
 
-                let amount = format_units(
+                let profit = format_units(
                     U256::from_str_radix(
                         opportunity.profit.unwrap_or(String::from("0")).as_ref(),
                         10,
@@ -155,7 +155,7 @@ impl NotificationHandler {
                     "succeeded" => {
                         format!(
                             "🟢 *{:.4}* {} ~ $*{:.2}*\nStatus: *SUCCESS*\nNetwork: *{}*\nEstimated: *{:.4}* {} ~ $*{:.2}*\nGas: $*{:.2}*",
-                            amount,
+                            profit,
                             token,
                             opportunity.profit_usd.unwrap_or(0.0),
                             chain_name,
@@ -165,10 +165,10 @@ impl NotificationHandler {
                             opportunity.gas_usd.unwrap_or(0.0)
                         )
                     }
-                    "partially_succeeded" => {
+                    "partially_succeeded" | "partiallysucceeded" => {
                         format!(
                             "🟡 *{:.4}* {} ~ $*{:.2}*\nStatus: *PARTIAL*\nNetwork: *{}*\nEstimated: *{:.4}* {} ~ $*{:.2}*\nGas: $*{:.2}*",
-                            amount,
+                            profit,
                             token,
                             opportunity.profit_usd.unwrap_or(0.0),
                             chain_name,
@@ -181,7 +181,7 @@ impl NotificationHandler {
                     "reverted" => {
                         format!(
                             "🔴*{:.4}* {} ~ $*{:.2}*\nStatus: *REVERTED*\nNetwork: *{}*\nGas: $*{:.2}*",
-                            amount,
+                            profit,
                             token,
                             opportunity.estimate_profit_usd.unwrap_or(0.0),
                             chain_name,
@@ -191,7 +191,7 @@ impl NotificationHandler {
                     "error" => {
                         format!(
                             "🔴*{:.4}* {} ~ $*{:.2}*\nStatus: *ERROR*\nNetwork: *{}*",
-                            amount,
+                            profit,
                             token,
                             opportunity.estimate_profit_usd.unwrap_or(0.0),
                             chain_name,
