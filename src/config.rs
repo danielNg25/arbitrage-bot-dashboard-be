@@ -44,6 +44,8 @@ pub struct IndexerConfig {
 pub struct TelegramConfig {
     pub token: Option<String>,
     pub chat_id: Option<String>,
+    pub big_opp_thread_id: Option<u64>,
+    pub failed_opp_thread_id: Option<u64>,
     pub min_profit_usd: f64,
 }
 
@@ -83,6 +85,8 @@ impl Default for Config {
             telegram: TelegramConfig {
                 token: None,
                 chat_id: None,
+                big_opp_thread_id: None,
+                failed_opp_thread_id: None,
                 min_profit_usd: 2.0,
             },
         }

@@ -179,7 +179,7 @@ impl Indexer {
         // Send notification if configured
         if let Some(notification) = notification {
             for opportunity in all_opportunities {
-                if opportunity.profit_usd.unwrap_or(0.0) >= notification.min_profit_usd {
+                if opportunity.estimate_profit_usd.unwrap_or(0.0) >= notification.min_profit_usd {
                     notification
                         .notification_tx
                         .send(NotificationType::HighOpportunity(opportunity))

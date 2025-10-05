@@ -24,6 +24,8 @@ fn escape_markdownv2(text: &str) -> String {
 pub struct NotificationHandler {
     bot: Bot,
     chat_id: String,
+    big_opp_thread_id: u64,
+    failed_opp_thread_id: u64,
     db: Option<Arc<Database>>,
 }
 
@@ -32,28 +34,54 @@ pub enum NotificationType {
 }
 
 impl NotificationHandler {
-    pub fn _new(token: String, chat_id: String) -> Self {
+    pub fn _new(
+        token: String,
+        chat_id: String,
+        big_opp_thread_id: u64,
+        failed_opp_thread_id: u64,
+    ) -> Self {
         let bot = Bot::new(token);
         Self {
             bot,
             chat_id,
+            big_opp_thread_id,
+            failed_opp_thread_id,
             db: None,
         }
     }
 
-    pub fn with_database(token: String, chat_id: String, db: Arc<Database>) -> Self {
+    pub fn with_database(
+        token: String,
+        chat_id: String,
+        big_opp_thread_id: u64,
+        failed_opp_thread_id: u64,
+        db: Arc<Database>,
+    ) -> Self {
         let bot = Bot::new(token);
         Self {
             bot,
             chat_id,
+            big_opp_thread_id,
+            failed_opp_thread_id,
             db: Some(db),
         }
     }
 
     pub fn from_config(config: &crate::config::Config, db: Arc<Database>) -> Option<Self> {
-        if let (Some(token), Some(chat_id)) = (&config.telegram.token, &config.telegram.chat_id) {
+        if let (Some(token), Some(chat_id), Some(big_opp_thread_id), Some(failed_opp_thread_id)) = (
+            &config.telegram.token,
+            &config.telegram.chat_id,
+            &config.telegram.big_opp_thread_id,
+            &config.telegram.failed_opp_thread_id,
+        ) {
             if !token.is_empty() && !chat_id.is_empty() {
-                return Some(Self::with_database(token.clone(), chat_id.clone(), db));
+                return Some(Self::with_database(
+                    token.clone(),
+                    chat_id.clone(),
+                    big_opp_thread_id.clone(),
+                    failed_opp_thread_id.clone(),
+                    db,
+                ));
             }
         }
         None
@@ -150,6 +178,7 @@ impl NotificationHandler {
                 .unwrap_or("0.0".to_string())
                 .parse::<f64>()
                 .unwrap_or(0.0);
+                let mut thread_id = self.big_opp_thread_id;
 
                 let message = match opportunity.status.as_str().to_lowercase().as_str() {
                     "succeeded" => {
@@ -179,16 +208,19 @@ impl NotificationHandler {
                         )
                     }
                     "reverted" => {
+                        thread_id = self.failed_opp_thread_id;
                         format!(
-                            "🔴*{:.4}* {} ~ $*{:.2}*\nStatus: *REVERTED*\nNetwork: *{}*\nGas: $*{:.2}*",
+                            "🔴*{:.4}* {} ~ $*{:.2}*\nStatus: *REVERTED*\nNetwork: *{}*\nGas: $*{:.2}*\nBlock delay: *{}* blocks",
                             profit,
                             token,
                             opportunity.estimate_profit_usd.unwrap_or(0.0),
                             chain_name,
-                            opportunity.gas_usd.unwrap_or(0.0)
+                            opportunity.gas_usd.unwrap_or(0.0),
+                            opportunity.execute_block_number.unwrap_or(0) - opportunity.source_block_number.unwrap_or(0)
                         )
                     }
                     "error" => {
+                        thread_id = self.failed_opp_thread_id;
                         format!(
                             "🔴*{:.4}* {} ~ $*{:.2}*\nStatus: *ERROR*\nNetwork: *{}*",
                             profit,
@@ -236,6 +268,7 @@ impl NotificationHandler {
                 if let Err(e) = self
                     .bot
                     .send_message(self.chat_id.clone(), final_message)
+                    .message_thread_id(thread_id as i32)
                     .parse_mode(teloxide::types::ParseMode::MarkdownV2)
                     .disable_web_page_preview(true)
                     .send()
@@ -245,6 +278,7 @@ impl NotificationHandler {
                     if let Err(e) = self
                         .bot
                         .send_message(self.chat_id.clone(), "Error sending notification")
+                        .message_thread_id(self.failed_opp_thread_id as i32)
                         .parse_mode(teloxide::types::ParseMode::MarkdownV2)
                         .disable_web_page_preview(true)
                         .send()
