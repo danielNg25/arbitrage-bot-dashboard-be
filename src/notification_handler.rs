@@ -2,6 +2,8 @@ use alloy::primitives::utils::format_units;
 use alloy::primitives::U256;
 use log::info;
 use mongodb::Database;
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::sync::Arc;
 use teloxide::{prelude::*, Bot};
 
@@ -274,7 +276,14 @@ impl NotificationHandler {
                     .send()
                     .await
                 {
-                    eprintln!("Failed to send notification: {}", e);
+                    let error_msg = format!("Failed to send notification: {}", e);
+                    eprintln!("{}", &error_msg);
+
+                    // Log error to file
+                    if let Err(log_err) = log_error_to_file(&error_msg) {
+                        eprintln!("Failed to write to log file: {}", log_err);
+                    }
+
                     if let Err(e) = self
                         .bot
                         .send_message(self.chat_id.clone(), "Error sending notification")
@@ -284,11 +293,30 @@ impl NotificationHandler {
                         .send()
                         .await
                     {
-                        eprintln!("Failed to send failed notification: {}", e);
+                        let error_msg = format!("Failed to send failed notification: {}", e);
+                        eprintln!("{}", &error_msg);
+
+                        // Log error to file
+                        if let Err(log_err) = log_error_to_file(&error_msg) {
+                            eprintln!("Failed to write to log file: {}", log_err);
+                        }
                     }
                 }
             }
         }
         info!("Notification sent successfully");
     }
+}
+
+/// Log error message to a log file
+fn log_error_to_file(error_msg: &str) -> std::io::Result<()> {
+    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let log_entry = format!("[{}] {}\n", timestamp, error_msg);
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("log.txt")?;
+
+    file.write_all(log_entry.as_bytes())
 }
