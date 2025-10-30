@@ -28,11 +28,17 @@ pub struct NotificationHandler {
     chat_id: String,
     big_opp_thread_id: u64,
     failed_opp_thread_id: u64,
+    new_pool_thread_id: u64,
     db: Option<Arc<Database>>,
 }
 
 pub enum NotificationType {
     HighOpportunity(Opportunity),
+    NewPool {
+        network_name: String,
+        network_id: u64,
+        pool_addresses: Vec<String>,
+    },
 }
 
 impl NotificationHandler {
@@ -41,6 +47,7 @@ impl NotificationHandler {
         chat_id: String,
         big_opp_thread_id: u64,
         failed_opp_thread_id: u64,
+        new_pool_thread_id: u64,
     ) -> Self {
         let bot = Bot::new(token);
         Self {
@@ -48,6 +55,7 @@ impl NotificationHandler {
             chat_id,
             big_opp_thread_id,
             failed_opp_thread_id,
+            new_pool_thread_id,
             db: None,
         }
     }
@@ -57,6 +65,7 @@ impl NotificationHandler {
         chat_id: String,
         big_opp_thread_id: u64,
         failed_opp_thread_id: u64,
+        new_pool_thread_id: u64,
         db: Arc<Database>,
     ) -> Self {
         let bot = Bot::new(token);
@@ -65,16 +74,24 @@ impl NotificationHandler {
             chat_id,
             big_opp_thread_id,
             failed_opp_thread_id,
+            new_pool_thread_id,
             db: Some(db),
         }
     }
 
     pub fn from_config(config: &crate::config::Config, db: Arc<Database>) -> Option<Self> {
-        if let (Some(token), Some(chat_id), Some(big_opp_thread_id), Some(failed_opp_thread_id)) = (
+        if let (
+            Some(token),
+            Some(chat_id),
+            Some(big_opp_thread_id),
+            Some(failed_opp_thread_id),
+            Some(new_pool_thread_id),
+        ) = (
             &config.telegram.token,
             &config.telegram.chat_id,
             &config.telegram.big_opp_thread_id,
             &config.telegram.failed_opp_thread_id,
+            &config.telegram.new_pool_thread_id,
         ) {
             if !token.is_empty() && !chat_id.is_empty() {
                 return Some(Self::with_database(
@@ -82,6 +99,7 @@ impl NotificationHandler {
                     chat_id.clone(),
                     big_opp_thread_id.clone(),
                     failed_opp_thread_id.clone(),
+                    new_pool_thread_id.clone(),
                     db,
                 ));
             }
@@ -122,6 +140,63 @@ impl NotificationHandler {
 
     pub async fn send_notification(&self, notification_type: NotificationType) {
         match notification_type {
+            NotificationType::NewPool {
+                network_name,
+                network_id,
+                pool_addresses,
+            } => {
+                // Create message for new pool
+                let message = format!(
+                    "🆕 *New {} Pool Detected*\n\nNetwork: *{}* ({})\nPools: \n`{}`",
+                    pool_addresses.len(),
+                    network_name,
+                    network_id,
+                    pool_addresses.join("`\n`")
+                );
+
+                // Escape the message content for MarkdownV2
+                let escaped_message = escape_markdownv2(&message);
+
+                // Send the message with Markdown parsing for clickable links
+                if let Err(e) = self
+                    .bot
+                    .send_message(self.chat_id.clone(), escaped_message)
+                    .message_thread_id(self.new_pool_thread_id as i32)
+                    .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+                    .disable_web_page_preview(true)
+                    .send()
+                    .await
+                {
+                    let error_msg = format!("Failed to send pool notification: {}", e);
+                    eprintln!("{}", &error_msg);
+
+                    // Log error to file
+                    if let Err(log_err) = log_error_to_file(&error_msg) {
+                        eprintln!("Failed to write to log file: {}", log_err);
+                    }
+
+                    if let Err(e) = self
+                        .bot
+                        .send_message(self.chat_id.clone(), "Error sending new pool notification")
+                        .message_thread_id(self.failed_opp_thread_id as i32)
+                        .parse_mode(teloxide::types::ParseMode::MarkdownV2)
+                        .disable_web_page_preview(true)
+                        .send()
+                        .await
+                    {
+                        let error_msg =
+                            format!("Failed to send failed new pool notification: {}", e);
+                        eprintln!("{}", &error_msg);
+
+                        // Log error to file
+                        if let Err(log_err) = log_error_to_file(&error_msg) {
+                            eprintln!("Failed to write to log file: {}", log_err);
+                        }
+                    }
+                }
+
+                info!("New pool notification sent successfully");
+            }
             NotificationType::HighOpportunity(opportunity) => {
                 // Get network and token information
                 let chain = self.get_network(opportunity.network_id).await;
@@ -213,7 +288,7 @@ impl NotificationHandler {
                         thread_id = self.failed_opp_thread_id;
                         format!(
                             "🔴*{:.4}* {} ~ $*{:.2}*\nStatus: *REVERTED*\nNetwork: *{}*\nGas: $*{:.2}*\nBlock delay: *{}* blocks",
-                            profit,
+                            estimate_profit,
                             token,
                             opportunity.estimate_profit_usd.unwrap_or(0.0),
                             chain_name,
@@ -225,7 +300,7 @@ impl NotificationHandler {
                         thread_id = self.failed_opp_thread_id;
                         format!(
                             "🔴*{:.4}* {} ~ $*{:.2}*\nStatus: *ERROR*\nNetwork: *{}*",
-                            profit,
+                            estimate_profit,
                             token,
                             opportunity.estimate_profit_usd.unwrap_or(0.0),
                             chain_name,

@@ -1,6 +1,8 @@
 use alloy::primitives::{Address, U256};
+use bson::doc;
 use chrono::Utc;
-use mongodb::bson;
+use log::{debug, error};
+use mongodb::{bson, Database};
 use serde::{Deserialize, Serialize};
 
 use crate::utils::{address_to_string, u256_to_string, OpportunityStatus};
@@ -22,6 +24,7 @@ pub struct Network {
     pub total_profit_usd: f64,
     pub total_gas_usd: f64,
     pub last_proccesed_created_at: Option<u64>,
+    pub last_pool_index_block: Option<u64>,
     pub last_processed_id: Option<String>,
     pub created_at: u64,
 }
@@ -48,9 +51,44 @@ impl Network {
             total_profit_usd: 0.0,
             total_gas_usd: 0.0,
             last_proccesed_created_at: None,
+            last_pool_index_block: None,
             last_processed_id: None,
             created_at: Utc::now().timestamp() as u64,
         }
+    }
+
+    pub async fn update_last_pool_index_block(&mut self, db: &Database, block_number: u64) {
+        self.last_pool_index_block = Some(block_number);
+        match Network::update_last_pool_index_block_inner(&db, self.chain_id, block_number).await {
+            Ok(_) => {
+                debug!(
+                    "Updated last_pool_index_block for network {} to {}",
+                    self.chain_id, block_number
+                );
+            }
+            Err(e) => {
+                error!(
+                    "Failed to update last_pool_index_block for network {}: {}",
+                    self.chain_id, e
+                );
+            }
+        }
+    }
+
+    async fn update_last_pool_index_block_inner(
+        db: &Database,
+        network_id: u64,
+        block_number: u64,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let networks_collection = db.collection::<Network>("networks");
+        networks_collection
+            .update_one(
+                doc! { "chain_id": network_id as i64 },
+                doc! { "$set": { "last_pool_index_block": block_number as i64 } },
+                None,
+            )
+            .await?;
+        Ok(())
     }
 }
 

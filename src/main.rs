@@ -12,6 +12,7 @@ mod handlers;
 mod indexer;
 mod models;
 mod notification_handler;
+mod pool_indexer;
 mod routes;
 mod utils;
 
@@ -19,6 +20,7 @@ use config::Config;
 use database::init_database;
 use indexer::Indexer;
 use notification_handler::NotificationHandler;
+use pool_indexer::PoolIndexer;
 use routes::configure_routes;
 
 use crate::indexer::NotificationConfig;
@@ -60,17 +62,39 @@ async fn main() -> std::io::Result<()> {
     );
 
     // Initialize notification handler if configured
-    let notification_handler =
-        Arc::new(NotificationHandler::from_config(&config, db_arc.clone()).unwrap());
+    let notification_handler_option = NotificationHandler::from_config(&config, db_arc.clone());
 
-    if notification_handler.is_configured() {
-        info!("Telegram notification handler initialized");
-        tokio::spawn(async move {
-            while let Some(opportunity) = notification_rx.recv().await {
-                let handler_clone = notification_handler.clone();
-                tokio::spawn(async move { handler_clone.send_notification(opportunity).await });
+    if let Some(notification_handler) = notification_handler_option {
+        let notification_handler = Arc::new(notification_handler);
+
+        if notification_handler.is_configured() {
+            info!("Telegram notification handler initialized");
+
+            // Clone for the notification receiver task
+            let notification_handler_for_rx = notification_handler.clone();
+
+            tokio::spawn(async move {
+                while let Some(opportunity) = notification_rx.recv().await {
+                    let handler_clone = notification_handler_for_rx.clone();
+                    tokio::spawn(async move { handler_clone.send_notification(opportunity).await });
+                }
+            });
+
+            // Start the pool indexer if enabled
+            if config.pool_indexer.enabled {
+                let pool_indexer =
+                    PoolIndexer::from_config(db_arc.clone(), notification_handler.clone(), &config);
+                pool_indexer.start().await;
+                info!(
+                    "Pool indexer started ({} second interval)",
+                    config.pool_indexer.interval_seconds
+                );
             }
-        });
+        } else {
+            info!("Telegram notification handler is not properly configured");
+        }
+    } else {
+        info!("Telegram notification handler not initialized (missing configuration)");
     }
 
     // Build bind address from config

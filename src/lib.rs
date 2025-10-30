@@ -6,6 +6,7 @@ pub mod handlers;
 pub mod indexer;
 pub mod models;
 pub mod notification_handler;
+pub mod pool_indexer;
 pub mod routes;
 pub mod utils;
 

@@ -8,6 +8,7 @@ pub struct Config {
     pub database: DatabaseConfig,
     pub cors: CorsConfig,
     pub indexer: IndexerConfig,
+    pub pool_indexer: PoolIndexerConfig,
     pub telegram: TelegramConfig,
 }
 
@@ -41,11 +42,19 @@ pub struct IndexerConfig {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PoolIndexerConfig {
+    pub interval_seconds: u64,
+    pub blocks_per_batch: u64,
+    pub enabled: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TelegramConfig {
     pub token: Option<String>,
     pub chat_id: Option<String>,
     pub big_opp_thread_id: Option<u64>,
     pub failed_opp_thread_id: Option<u64>,
+    pub new_pool_thread_id: Option<u64>,
     pub min_profit_usd: f64,
 }
 
@@ -82,11 +91,17 @@ impl Default for Config {
                 interval_minutes: 5,
                 hourly_data_retention_hours: 168, // 7 days * 24 hours
             },
+            pool_indexer: PoolIndexerConfig {
+                interval_seconds: 300, // 5 minutes
+                blocks_per_batch: 1000,
+                enabled: true,
+            },
             telegram: TelegramConfig {
                 token: None,
                 chat_id: None,
                 big_opp_thread_id: None,
                 failed_opp_thread_id: None,
+                new_pool_thread_id: None,
                 min_profit_usd: 2.0,
             },
         }
