@@ -80,6 +80,15 @@ impl PoolIndexer {
                 };
 
                 for mut network in networks {
+                    if network.enable_pool_indexer.is_none()
+                        || !network.enable_pool_indexer.unwrap()
+                    {
+                        info!(
+                            "Pool indexer is not enabled for network: {} ({})",
+                            network.name, network.chain_id
+                        );
+                        continue;
+                    }
                     if let Some(rpc) = &network.rpc {
                         info!(
                             "Indexing pools for network: {} ({})",
@@ -117,6 +126,8 @@ impl PoolIndexer {
                             continue;
                         }
 
+                        let mut pool_addresses: Vec<Address> = Vec::new();
+
                         // Process blocks in batches
                         let mut current_block = start_block;
                         while current_block < latest_block {
@@ -138,19 +149,17 @@ impl PoolIndexer {
                             )
                             .await
                             {
-                                Ok(count) => {
-                                    if count > 0 {
-                                        info!(
-                                            "Indexed {} new pools on network {} from blocks {} to {}",
-                                            count, network.chain_id, current_block, end_block
-                                        );
-                                    }
+                                Ok(pool_addresses_result) => {
+                                    pool_addresses.extend(pool_addresses_result);
                                 }
                                 Err(e) => {
                                     error!(
                                         "Error indexing pools on network {}: {}",
                                         network.chain_id, e
                                     );
+                                    // retry in 1 second
+                                    tokio::time::sleep(Duration::from_secs(1)).await;
+                                    continue;
                                 }
                             }
 
@@ -173,6 +182,26 @@ impl PoolIndexer {
                             }
 
                             current_block = end_block;
+                        }
+                        if !pool_addresses.is_empty() {
+                            info!(
+                                "New {} pools detected on {} ({})",
+                                pool_addresses.len(),
+                                network.name,
+                                network.chain_id,
+                            );
+                            send_new_pool_notification(
+                                &notification_handler,
+                                &network.name,
+                                network.chain_id,
+                                pool_addresses,
+                            )
+                            .await;
+                        } else {
+                            info!(
+                                "No new pools detected on {} ({})",
+                                network.name, network.chain_id
+                            );
                         }
                         network
                             .update_last_pool_index_block(&db, latest_block)
@@ -228,7 +257,7 @@ async fn index_all_pools(
     network: &Network,
     from_block: u64,
     to_block: u64,
-) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<Vec<Address>, Box<dyn std::error::Error + Send + Sync>> {
     // Define all the known pool creation event signatures
     let event_signatures = vec![
         // UniswapV2 PairCreated(address indexed token0, address indexed token1, address pair, uint256)
@@ -267,17 +296,8 @@ async fn index_all_pools(
             _ => continue,
         }
     }
-    let pool_addresses_len = pool_addresses.len();
-    // Send notification
-    send_new_pool_notification(
-        notification_handler,
-        &network.name,
-        network.chain_id,
-        pool_addresses,
-    )
-    .await;
 
-    Ok(pool_addresses_len)
+    Ok(pool_addresses)
 }
 
 async fn send_new_pool_notification(

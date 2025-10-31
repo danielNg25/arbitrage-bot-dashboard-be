@@ -25,6 +25,7 @@ pub struct Network {
     pub total_gas_usd: f64,
     pub last_proccesed_created_at: Option<u64>,
     pub last_pool_index_block: Option<u64>,
+    pub enable_pool_indexer: Option<bool>,
     pub last_processed_id: Option<String>,
     pub created_at: u64,
 }
@@ -52,6 +53,7 @@ impl Network {
             total_gas_usd: 0.0,
             last_proccesed_created_at: None,
             last_pool_index_block: None,
+            enable_pool_indexer: None,
             last_processed_id: None,
             created_at: Utc::now().timestamp() as u64,
         }
