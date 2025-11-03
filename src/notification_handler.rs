@@ -5,10 +5,23 @@ use mongodb::Database;
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::sync::Arc;
-use teloxide::{prelude::*, Bot};
+use teloxide::{
+    adaptors::throttle::{Limits, Throttle},
+    prelude::*,
+    types::{LinkPreviewOptions, MessageId, ThreadId},
+    Bot,
+};
 
 use crate::database;
 use crate::models::{Network, Opportunity, Token};
+
+const LINK_PREVIEW_OPTIONS: LinkPreviewOptions = LinkPreviewOptions {
+    is_disabled: false,
+    url: None,
+    prefer_small_media: false,
+    prefer_large_media: true,
+    show_above_text: true,
+};
 
 /// Escape special characters for MarkdownV2
 fn escape_markdownv2(text: &str) -> String {
@@ -24,7 +37,7 @@ fn escape_markdownv2(text: &str) -> String {
 }
 
 pub struct NotificationHandler {
-    bot: Bot,
+    bot: Throttle<Bot>,
     chat_id: String,
     big_opp_thread_id: u64,
     failed_opp_thread_id: u64,
@@ -49,7 +62,7 @@ impl NotificationHandler {
         failed_opp_thread_id: u64,
         new_pool_thread_id: u64,
     ) -> Self {
-        let bot = Bot::new(token);
+        let bot = Bot::new(token).throttle(Limits::default());
         Self {
             bot,
             chat_id,
@@ -68,7 +81,7 @@ impl NotificationHandler {
         new_pool_thread_id: u64,
         db: Arc<Database>,
     ) -> Self {
-        let bot = Bot::new(token);
+        let bot = Bot::new(token).throttle(Limits::default());
         Self {
             bot,
             chat_id,
@@ -161,9 +174,9 @@ impl NotificationHandler {
                 if let Err(e) = self
                     .bot
                     .send_message(self.chat_id.clone(), escaped_message)
-                    .message_thread_id(self.new_pool_thread_id as i32)
+                    .message_thread_id(ThreadId(MessageId(self.new_pool_thread_id as i32)))
                     .parse_mode(teloxide::types::ParseMode::MarkdownV2)
-                    .disable_web_page_preview(true)
+                    .link_preview_options(LINK_PREVIEW_OPTIONS)
                     .send()
                     .await
                 {
@@ -178,9 +191,9 @@ impl NotificationHandler {
                     if let Err(e) = self
                         .bot
                         .send_message(self.chat_id.clone(), "Error sending new pool notification")
-                        .message_thread_id(self.failed_opp_thread_id as i32)
+                        .message_thread_id(ThreadId(MessageId(self.failed_opp_thread_id as i32)))
                         .parse_mode(teloxide::types::ParseMode::MarkdownV2)
-                        .disable_web_page_preview(true)
+                        .link_preview_options(LINK_PREVIEW_OPTIONS)
                         .send()
                         .await
                     {
@@ -345,9 +358,9 @@ impl NotificationHandler {
                 if let Err(e) = self
                     .bot
                     .send_message(self.chat_id.clone(), final_message)
-                    .message_thread_id(thread_id as i32)
+                    .message_thread_id(ThreadId(MessageId(thread_id as i32)))
                     .parse_mode(teloxide::types::ParseMode::MarkdownV2)
-                    .disable_web_page_preview(true)
+                    .link_preview_options(LINK_PREVIEW_OPTIONS)
                     .send()
                     .await
                 {
@@ -362,9 +375,9 @@ impl NotificationHandler {
                     if let Err(e) = self
                         .bot
                         .send_message(self.chat_id.clone(), "Error sending notification")
-                        .message_thread_id(self.failed_opp_thread_id as i32)
+                        .message_thread_id(ThreadId(MessageId(self.failed_opp_thread_id as i32)))
                         .parse_mode(teloxide::types::ParseMode::MarkdownV2)
-                        .disable_web_page_preview(true)
+                        .link_preview_options(LINK_PREVIEW_OPTIONS)
                         .send()
                         .await
                     {
