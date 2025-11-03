@@ -8,20 +8,13 @@ use std::sync::Arc;
 use teloxide::{
     adaptors::throttle::{Limits, Throttle},
     prelude::*,
+    sugar::request::RequestLinkPreviewExt,
     types::{LinkPreviewOptions, MessageId, ThreadId},
     Bot,
 };
 
 use crate::database;
 use crate::models::{Network, Opportunity, Token};
-
-const LINK_PREVIEW_OPTIONS: LinkPreviewOptions = LinkPreviewOptions {
-    is_disabled: false,
-    url: None,
-    prefer_small_media: false,
-    prefer_large_media: true,
-    show_above_text: true,
-};
 
 /// Escape special characters for MarkdownV2
 fn escape_markdownv2(text: &str) -> String {
@@ -175,8 +168,8 @@ impl NotificationHandler {
                     .bot
                     .send_message(self.chat_id.clone(), escaped_message)
                     .message_thread_id(ThreadId(MessageId(self.new_pool_thread_id as i32)))
+                    .disable_link_preview(true)
                     .parse_mode(teloxide::types::ParseMode::MarkdownV2)
-                    .link_preview_options(LINK_PREVIEW_OPTIONS)
                     .send()
                     .await
                 {
@@ -192,8 +185,8 @@ impl NotificationHandler {
                         .bot
                         .send_message(self.chat_id.clone(), "Error sending new pool notification")
                         .message_thread_id(ThreadId(MessageId(self.failed_opp_thread_id as i32)))
+                        .disable_link_preview(true)
                         .parse_mode(teloxide::types::ParseMode::MarkdownV2)
-                        .link_preview_options(LINK_PREVIEW_OPTIONS)
                         .send()
                         .await
                     {
@@ -359,8 +352,8 @@ impl NotificationHandler {
                     .bot
                     .send_message(self.chat_id.clone(), final_message)
                     .message_thread_id(ThreadId(MessageId(thread_id as i32)))
+                    .disable_link_preview(true)
                     .parse_mode(teloxide::types::ParseMode::MarkdownV2)
-                    .link_preview_options(LINK_PREVIEW_OPTIONS)
                     .send()
                     .await
                 {
@@ -376,8 +369,8 @@ impl NotificationHandler {
                         .bot
                         .send_message(self.chat_id.clone(), "Error sending notification")
                         .message_thread_id(ThreadId(MessageId(self.failed_opp_thread_id as i32)))
+                        .disable_link_preview(true)
                         .parse_mode(teloxide::types::ParseMode::MarkdownV2)
-                        .link_preview_options(LINK_PREVIEW_OPTIONS)
                         .send()
                         .await
                     {
