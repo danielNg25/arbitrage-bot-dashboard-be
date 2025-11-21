@@ -566,7 +566,8 @@ pub async fn get_opportunity_details(
     let mut path_tokens = Vec::new();
     let mut path_pools = Vec::new();
 
-    if let Some(ref path) = opportunity.path {
+    if opportunity.path_v3.is_some() && !opportunity.path_v3.as_ref().unwrap().is_empty() {
+        let path = opportunity.path_v3.as_ref().unwrap();
         // Process the path: even indices are tokens, odd indices are pools
         debug!("Processing path with {} elements", path.len());
 
@@ -582,13 +583,77 @@ pub async fn get_opportunity_details(
             .collect();
 
         for (index, address) in path.iter().enumerate() {
-            debug!(
-                "Path element {}: {} (type: {})",
-                index,
-                address,
-                if index % 2 == 0 { "token" } else { "pool" }
-            );
+            if index % 5 == 0 {
+                // Token - lookup from batch fetched data
+                let address_lower = address.to_lowercase();
+                if let Some(token) = token_map.get(&address_lower) {
+                    debug!(
+                        "Found token: {} - name: {:?}, symbol: {:?}",
+                        token.address, token.name, token.symbol
+                    );
+                    path_tokens.push(crate::models::TokenResponse {
+                        id: token.id.map(|id| id.to_hex()).unwrap_or_default(),
+                        address: token.address.clone(),
+                        name: token.name.clone(),
+                        symbol: token.symbol.clone(),
+                        decimals: token.decimals,
+                        price: token.price,
+                    });
+                } else {
+                    debug!("Token not found for address: {}", address_lower);
+                    // Token not found, create a basic response
+                    path_tokens.push(crate::models::TokenResponse {
+                        id: "".to_string(), // No ID for tokens not found in database
+                        address: address.clone(),
+                        name: None,
+                        symbol: None,
+                        decimals: None,
+                        price: None,
+                    });
+                }
+            } else if index % 5 == 1 {
+                // Pool - lookup from batch fetched data
+                let address_lower = address.to_lowercase();
+                if let Some(pool) = pool_map.get(&address_lower) {
+                    debug!(
+                        "Found pool: {} - type: {}, tokens: {:?}",
+                        pool.address, pool.pool_type, pool.tokens
+                    );
+                    path_pools.push(crate::models::PoolResponse {
+                        id: pool.id.map(|id| id.to_hex()).unwrap_or_default(),
+                        address: pool.address.clone(),
+                        pool_type: pool.pool_type.clone(),
+                        tokens: pool.tokens.clone(),
+                    });
+                } else {
+                    debug!("Pool not found for address: {}", address_lower);
+                    // Pool not found, create a basic response
+                    path_pools.push(crate::models::PoolResponse {
+                        id: "".to_string(), // No ID for pools not found in database
+                        address: address.clone(),
+                        pool_type: "Unknown".to_string(),
+                        tokens: Vec::new(),
+                    });
+                }
+            }
+        }
+    } else if opportunity.path.is_some() && !opportunity.path.as_ref().unwrap().is_empty() {
+        let path = opportunity.path.as_ref().unwrap();
+        // Process the path: even indices are tokens, odd indices are pools
+        debug!("Processing path with {} elements", path.len());
 
+        // Create lookup maps for fast access
+        let token_map: std::collections::HashMap<String, &crate::models::Token> = all_tokens
+            .iter()
+            .map(|token| (token.address.to_lowercase(), token))
+            .collect();
+
+        let pool_map: std::collections::HashMap<String, &crate::models::Pool> = all_pools
+            .iter()
+            .map(|pool| (pool.address.to_lowercase(), pool))
+            .collect();
+
+        for (index, address) in path.iter().enumerate() {
             if index % 2 == 0 {
                 // Token - lookup from batch fetched data
                 let address_lower = address.to_lowercase();
@@ -678,6 +743,7 @@ pub async fn get_opportunity_details(
         estimate_profit: opportunity.estimate_profit.clone(),
         estimate_profit_usd: opportunity.estimate_profit_usd,
         path: opportunity.path.clone(),
+        path_v3: opportunity.path_v3.clone(),
         received_at: opportunity.received_at.map(|ts| {
             let seconds = ts as i64 / 1000;
             let milliseconds = (ts % 1000) as u32;
@@ -789,16 +855,96 @@ pub async fn get_opportunity_details_by_tx_hash(
     let mut path_pools = Vec::new();
 
     if let Some(debug) = debug_info {
-        if let Some(path) = &debug.path {
+        if debug.path_v3.is_some() && !debug.path_v3.as_ref().unwrap().is_empty() {
             // Process the path: even indices are tokens, odd indices are pools
+            let path = debug.path_v3.as_ref().unwrap();
             debug!("Processing path with {} elements", path.len());
             for (index, address) in path.iter().enumerate() {
-                debug!(
-                    "Path element {}: {} (type: {})",
-                    index,
-                    address,
-                    if index % 2 == 0 { "token" } else { "pool" }
-                );
+                if index % 5 == 0 {
+                    // Token - fetch token details
+                    let address_lower = address.to_lowercase();
+                    debug!(
+                        "Querying token with network_id: {}, address: {} (lowercase: {})",
+                        opportunity.network_id, address, address_lower
+                    );
+                    if let Some(token) = tokens_collection
+                        .find_one(
+                            doc! {
+                                "network_id": opportunity.network_id as i64,
+                                "address": &address_lower
+                            },
+                            None,
+                        )
+                        .await?
+                    {
+                        debug!(
+                            "Found token: {} - name: {:?}, symbol: {:?}",
+                            token.address, token.name, token.symbol
+                        );
+                        path_tokens.push(crate::models::TokenResponse {
+                            id: token.id.map(|id| id.to_hex()).unwrap_or_default(),
+                            address: token.address,
+                            name: token.name,
+                            symbol: token.symbol,
+                            decimals: token.decimals,
+                            price: token.price,
+                        });
+                    } else {
+                        debug!("Token not found for address: {}", address_lower);
+                        // Token not found, create a basic response
+                        path_tokens.push(crate::models::TokenResponse {
+                            id: "".to_string(), // No ID for tokens not found in database
+                            address: address.clone(),
+                            name: None,
+                            symbol: None,
+                            decimals: None,
+                            price: None,
+                        });
+                    }
+                } else if index % 5 == 1 {
+                    // Pool - fetch pool details
+                    let address_lower = address.to_lowercase();
+                    debug!(
+                        "Querying pool with network_id: {}, address: {} (lowercase: {})",
+                        opportunity.network_id, address, address_lower
+                    );
+                    if let Some(pool) = pools_collection
+                        .find_one(
+                            doc! {
+                                "network_id": opportunity.network_id as i64,
+                                "address": &address_lower
+                            },
+                            None,
+                        )
+                        .await?
+                    {
+                        debug!(
+                            "Found pool: {} - type: {}, tokens: {:?}",
+                            pool.address, pool.pool_type, pool.tokens
+                        );
+                        path_pools.push(crate::models::PoolResponse {
+                            id: pool.id.map(|id| id.to_hex()).unwrap_or_default(),
+                            address: pool.address,
+                            pool_type: pool.pool_type,
+                            tokens: pool.tokens,
+                        });
+                    } else {
+                        debug!("Pool not found for address: {}", address_lower);
+                        // Pool not found, create a basic response
+                        path_pools.push(crate::models::PoolResponse {
+                            id: "".to_string(), // No ID for pools not found in database
+                            address: address.clone(),
+                            pool_type: "Unknown".to_string(),
+                            tokens: Vec::new(),
+                        });
+                    }
+                }
+            }
+        } else {
+            // Process the path: even indices are tokens, odd indices are pools
+            let path = debug.path_v3.as_ref().unwrap();
+            debug!("Processing path with {} elements", path.len());
+            for (index, address) in path.iter().enumerate() {
                 if index % 2 == 0 {
                     // Token - fetch token details
                     let address_lower = address.to_lowercase();
@@ -915,6 +1061,7 @@ pub async fn get_opportunity_details_by_tx_hash(
         estimate_profit: opportunity.estimate_profit.clone(),
         estimate_profit_usd: opportunity.estimate_profit_usd,
         path: opportunity.path.clone(),
+        path_v3: opportunity.path_v3.clone(),
         received_at: opportunity.received_at.map(|ts| {
             let seconds = ts as i64 / 1000;
             let milliseconds = (ts % 1000) as u32;

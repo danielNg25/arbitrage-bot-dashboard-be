@@ -8,6 +8,12 @@ sol! {
 
 sol! {
     #[sol(rpc)]
+    IUniversalRouterExactInput,
+    "abis/IUniversalRouterExactInput.json"
+}
+
+sol! {
+    #[sol(rpc)]
     IUniswapV3Factory,
     "abis/IUniswapV3Factory.json"
 }

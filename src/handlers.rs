@@ -7,7 +7,7 @@ use std::{str::FromStr, sync::Arc};
 use tokio::sync::mpsc;
 
 use crate::{
-    contract::IUniversalRouter::IUniversalRouterInstance,
+    contract::{IUniversalRouter::IUniversalRouterInstance, IUniversalRouterExactInput},
     database::{
         get_networks_with_stats, get_opportunities, get_profit_over_time, get_summary_aggregations,
         get_time_aggregations, get_token_performance, prune_old_opportunities,
@@ -21,7 +21,7 @@ use crate::{
 };
 use alloy::{
     hex::FromHex,
-    primitives::{Address, Bytes, U256},
+    primitives::{aliases::U24, Address, Bytes, U256, U8},
     providers::ProviderBuilder,
     transports::http::reqwest::Url,
 };
@@ -35,7 +35,9 @@ pub enum SolidityDataType<'a> {
     Address(Address),
     Bytes(&'a [u8]),
     Bool(bool),
-    Number(U256),
+    NumberU256(U256),
+    NumberU8(U8),
+    NumberU24(U24),
     NumberWithShift(U256, TakeLastXBytes),
 }
 
@@ -52,8 +54,14 @@ pub mod abi {
             SolidityDataType::Address(a) => {
                 res.extend(a.0);
             }
-            SolidityDataType::Number(n) => {
+            SolidityDataType::NumberU256(n) => {
                 res.extend(n.to_be_bytes::<32>());
+            }
+            SolidityDataType::NumberU8(n) => {
+                res.extend(n.to_be_bytes::<1>());
+            }
+            SolidityDataType::NumberU24(n) => {
+                res.extend(n.to_be_bytes::<3>());
             }
             SolidityDataType::Bytes(b) => {
                 res.extend(*b);
@@ -865,51 +873,109 @@ pub async fn debug_opportunity_handler(
 /// Build transaction data from opportunity (completely following build_opp.rs pattern)
 fn build_transaction_data(opportunity: &crate::models::Opportunity) -> Result<String, ApiError> {
     // Get the path from opportunity (similar to opportunity.cycle in build_opp.rs)
-    let path = if let Some(path) = &opportunity.path {
-        path
+    if opportunity.path.is_some() && !opportunity.path.as_ref().unwrap().is_empty() {
+        info!(
+            "Building transaction data for V1 path: {:?}",
+            opportunity.path
+        );
+        let path = opportunity.path.as_ref().unwrap();
+
+        // Build the path exactly like build_opp.rs
+        // Process from the middle to the beginning (reverse order)
+        let path_length = path.len();
+        let mut path_items: Vec<SolidityDataType> = Vec::new();
+
+        // Start from path_length/2 down to 1
+        for i in (1..=(path_length / 2)).rev() {
+            // Calculate indices for token and pool
+            let token_idx = (i - 1) * 2;
+            let pool_idx = token_idx + 1;
+
+            // Make sure indices are valid
+            if token_idx < path.len() && pool_idx < path.len() {
+                let token_address = Address::from_str(&path[token_idx]).unwrap();
+                path_items.push(SolidityDataType::Address(token_address));
+
+                // Get pool address
+                let pool_address = Address::from_str(&path[pool_idx]).unwrap();
+                path_items.push(SolidityDataType::Address(pool_address));
+            }
+        }
+
+        // Use the exact same encode_packed function as build_opp.rs
+        let (_, encoded) = abi::encode_packed(&path_items);
+        let data = Bytes::from_hex(encoded).unwrap();
+
+        // Calculate amount exactly like build_opp.rs
+        let amount = U256::from_str(opportunity.amount.as_str()).unwrap()
+            + U256::from_str(opportunity.estimate_profit.as_ref().unwrap().as_str()).unwrap();
+
+        let provider =
+            ProviderBuilder::new().connect_http(Url::parse("https://www.google.com/").unwrap());
+
+        let router = IUniversalRouterInstance::new(Address::ZERO, provider);
+        let swap_data = router.swap(amount, data).calldata().to_string();
+        info!("Swap data: {:?}", swap_data);
+        Ok(swap_data)
+    } else if opportunity.path_v3.is_some() && !opportunity.path_v3.as_ref().unwrap().is_empty() {
+        info!(
+            "Building transaction data for V3 path: {:?}",
+            opportunity.path_v3
+        );
+        let path = opportunity.path_v3.as_ref().unwrap();
+        // Build the path exactly like build_opp.rs
+        // Process from the middle to the beginning (reverse order)
+        let path_length = path.len();
+        let mut path_items: Vec<SolidityDataType> = Vec::new();
+
+        // Start from path_length/2 down to 1
+        for i in 1..=(path_length / 5) {
+            // Calculate indices for token and pool
+            let token_idx = (i - 1) * 5;
+            let pool_idx = token_idx + 1;
+            let token_out_idx = token_idx + 2;
+            let fee_idx = token_idx + 3;
+            let pool_type_idx = token_idx + 4;
+
+            // Make sure indices are valid
+            if token_idx < path.len() && pool_idx < path.len() {
+                let token_address = Address::from_str(&path[token_idx]).unwrap();
+                path_items.push(SolidityDataType::Address(token_address));
+
+                // Get pool address
+                let pool_address = Address::from_str(&path[pool_idx]).unwrap();
+                path_items.push(SolidityDataType::Address(pool_address));
+
+                let token_out_address = Address::from_str(&path[token_out_idx]).unwrap();
+                path_items.push(SolidityDataType::Address(token_out_address));
+
+                let fee = U24::from_str(&path[fee_idx]).unwrap();
+                path_items.push(SolidityDataType::NumberU24(fee));
+
+                let pool_type = U8::from_str(&path[pool_type_idx]).unwrap();
+                path_items.push(SolidityDataType::NumberU8(pool_type));
+            }
+        }
+
+        // Use the exact same encode_packed function as build_opp.rs
+        let (_, encoded) = abi::encode_packed(&path_items);
+        let data = Bytes::from_hex(encoded).unwrap();
+
+        // Calculate amount exactly like build_opp.rs
+        let amount = U256::from_str(opportunity.amount.as_str()).unwrap();
+
+        let provider =
+            ProviderBuilder::new().connect_http(Url::parse("https://www.google.com/").unwrap());
+
+        let router = IUniversalRouterExactInput::new(Address::ZERO, provider);
+        let swap_data = router.swap(amount, data).calldata().to_string();
+        info!("Swap data: {:?}", swap_data);
+        Ok(swap_data)
     } else {
         return Err(ApiError::DatabaseError(
             "Opportunity path is required for transaction building".to_string(),
         ));
-    };
-
-    // Build the path exactly like build_opp.rs
-    // Process from the middle to the beginning (reverse order)
-    let path_length = path.len();
-    let mut path_items: Vec<SolidityDataType> = Vec::new();
-
-    // Start from path_length/2 down to 1
-    for i in (1..=(path_length / 2)).rev() {
-        // Calculate indices for token and pool
-        let token_idx = (i - 1) * 2;
-        let pool_idx = token_idx + 1;
-
-        // Make sure indices are valid
-        if token_idx < path.len() && pool_idx < path.len() {
-            let token_address = Address::from_str(&path[token_idx]).unwrap();
-            path_items.push(SolidityDataType::Address(token_address));
-
-            // Get pool address
-            let pool_address = Address::from_str(&path[pool_idx]).unwrap();
-            path_items.push(SolidityDataType::Address(pool_address));
-        }
     }
-
-    // Use the exact same encode_packed function as build_opp.rs
-    let (_, encoded) = abi::encode_packed(&path_items);
-    let data = Bytes::from_hex(encoded).unwrap();
-
-    // Calculate amount exactly like build_opp.rs
-    let amount = U256::from_str(opportunity.amount.as_str()).unwrap()
-        + U256::from_str(opportunity.estimate_profit.as_ref().unwrap().as_str()).unwrap();
-
-    let provider =
-        ProviderBuilder::new().connect_http(Url::parse("https://www.google.com/").unwrap());
-
-    let router = IUniversalRouterInstance::new(Address::ZERO, provider);
-    let swap_data = router.swap(amount, data).calldata().to_string();
-    info!("Swap data: {:?}", swap_data);
-    Ok(swap_data)
 }
 
 /// Execute cast call using tokio::process::Command for better async performance

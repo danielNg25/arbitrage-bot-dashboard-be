@@ -186,6 +186,7 @@ pub struct Opportunity {
     pub estimate_profit: Option<String>,
     pub estimate_profit_usd: Option<f64>,
     pub path: Option<Vec<String>>,
+    pub path_v3: Option<Vec<String>>,
     pub received_at: Option<u64>,
     pub send_at: Option<u64>,
     pub simulation_time: Option<u64>,
@@ -234,6 +235,7 @@ impl Opportunity {
             estimate_profit: None,
             estimate_profit_usd: None,
             path: None,
+            path_v3: None,
             received_at: None,
             send_at: None,
             simulation_time: None,
@@ -387,6 +389,7 @@ pub struct OpportunityDetailsData {
     pub estimate_profit: Option<String>,
     pub estimate_profit_usd: Option<f64>,
     pub path: Option<Vec<String>>,
+    pub path_v3: Option<Vec<String>>,
     pub received_at: Option<String>, // ISO 8601 formatted
     pub send_at: Option<String>,     // ISO 8601 formatted
     pub simulation_time: Option<u64>,
